@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/orchestrator-guard.py\""
+            "command": "python .claude/hooks/orchestrator-guard.py"
           }
         ]
       },
@@ -15,7 +15,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/scope-guard.py\""
+            "command": "python .claude/hooks/scope-guard.py"
           }
         ]
       }
@@ -25,7 +25,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$CLAUDE_PROJECT_DIR/.claude/hooks/verify-implementation.py\"",
+            "command": "python .claude/hooks/verify-implementation.py",
             "timeout": 30
           }
         ]
