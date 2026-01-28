@@ -1,0 +1,35 @@
+# Orchestrator/Agent markers
+.orchestrator-lock
+.agent-active
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.idea/
+.vscode/
+*.swp
+
+# Chat exports (don't commit conversation logs)
+*.txt
+
+# Generated spec artifacts (keep template, not active specs)
+Specs/Active/*/children/
+Specs/Active/*/research.json
+Specs/Active/*/messages.json
+Specs/Active/*/agent-context.json
+Specs/Active/*/parent-context.json
+
+# Build outputs
+src/
+dist/
+node_modules/
+bin/
+obj/

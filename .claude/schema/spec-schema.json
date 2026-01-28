@@ -1,0 +1,203 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://example.com/spec-schema.json",
+  "title": "Spec Schema",
+  "description": "Schema for hierarchical spec definitions used by Ralph-Recursive",
+  "type": "object",
+  "required": ["name", "status", "overview", "interfaces", "structure"],
+  "properties": {
+    "name": { "type": "string" },
+    "version": { "type": "string", "default": "1.0.0" },
+    "status": { "type": "string", "enum": ["draft", "ready", "in_progress", "complete", "failed"] },
+    "author": { "type": "string" },
+    "created": { "type": "string", "format": "date-time" },
+    "updated": { "type": "string", "format": "date-time" },
+    
+    "overview": {
+      "type": "object",
+      "required": ["problem", "success"],
+      "properties": {
+        "problem": { "type": "string" },
+        "success": { "type": "string" },
+        "context": { "type": "string" }
+      }
+    },
+    
+    "interfaces": {
+      "type": "object",
+      "properties": {
+        "provides": { "type": "array", "items": { "$ref": "#/$defs/interface" } },
+        "requires": { "type": "array", "items": { "$ref": "#/$defs/dependency" } },
+        "shared_types": { "type": "array", "items": { "$ref": "#/$defs/shared_type" } }
+      }
+    },
+    
+    "structure": {
+      "type": "object",
+      "required": ["is_leaf"],
+      "properties": {
+        "is_leaf": { "type": ["boolean", "null"] },
+        "children": { "type": "array", "items": { "$ref": "#/$defs/child" } },
+        "composition": { "type": "string" },
+        "classes": { "type": "array", "items": { "$ref": "#/$defs/class_def" } },
+        "dependencies": { "type": "array", "items": { "$ref": "#/$defs/internal_dependency" } }
+      }
+    },
+    
+    "criteria": {
+      "type": "object",
+      "properties": {
+        "acceptance": { "type": "array", "items": { "$ref": "#/$defs/criterion" } },
+        "edge_cases": { "type": "array", "items": { "$ref": "#/$defs/criterion" } },
+        "integration": { "type": "array", "items": { "$ref": "#/$defs/criterion" } }
+      }
+    },
+    
+    "constraints": {
+      "type": "object",
+      "properties": {
+        "tech_stack": { "$ref": "#/$defs/tech_stack" },
+        "scope_boundaries": { "type": "array", "items": { "type": "string" } },
+        "performance": { "type": "array", "items": { "type": "string" } },
+        "security": { "type": "array", "items": { "type": "string" } },
+        "open_questions": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    
+    "verification": {
+      "type": "object",
+      "properties": {
+        "tests_passed": { "type": ["boolean", "null"] },
+        "lint_passed": { "type": ["boolean", "null"] },
+        "build_passed": { "type": ["boolean", "null"] },
+        "deviations": { "type": "array", "items": { "type": "string" } },
+        "summary": { "type": "string" }
+      }
+    },
+    
+    "runtime": {
+      "type": "object",
+      "properties": {
+        "depth": { "type": "integer" },
+        "ralph_iteration": { "type": "integer" },
+        "all_tests_passed": { "type": "boolean" },
+        "integration_tests_passed": { "type": "boolean" },
+        "depends_on": { "type": "array", "items": { "type": "string" } },
+        "errors": { "$ref": "#/$defs/errors" }
+      }
+    }
+  },
+  
+  "$defs": {
+    "tech_stack": {
+      "type": "object",
+      "description": "Technology stack override for this spec. Takes precedence over STYLE.md defaults.",
+      "properties": {
+        "language": { "type": "string", "description": "Primary language (TypeScript, C#, Python, Go, Java, Rust)" },
+        "runtime": { "type": "string", "description": "Runtime environment (Node.js 20+, .NET 8, Python 3.11+)" },
+        "frameworks": { "type": "array", "items": { "type": "string" }, "description": "Key frameworks to use" },
+        "rationale": { "type": "string", "description": "Why this tech stack was chosen for this spec" }
+      }
+    },
+    "interface": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "members": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "signature"],
+            "properties": {
+              "name": { "type": "string" },
+              "signature": { "type": "string" },
+              "expectations": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "dependency": {
+      "type": "object",
+      "required": ["name", "source"],
+      "properties": {
+        "name": { "type": "string" },
+        "source": { "type": "string" },
+        "usage": { "type": "string" }
+      }
+    },
+    "shared_type": {
+      "type": "object",
+      "required": ["name", "kind"],
+      "properties": {
+        "name": { "type": "string" },
+        "kind": { "type": "string", "enum": ["class", "struct", "interface", "enum", "type", "record"] },
+        "description": { "type": "string" }
+      }
+    },
+    "child": {
+      "type": "object",
+      "required": ["name", "responsibility"],
+      "properties": {
+        "name": { "type": "string" },
+        "responsibility": { "type": "string" },
+        "provides": { "type": "array", "items": { "type": "string" } },
+        "requires": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "class_def": {
+      "type": "object",
+      "required": ["name", "type", "responsibility", "location"],
+      "properties": {
+        "name": { "type": "string" },
+        "type": { "type": "string", "enum": ["class", "interface", "struct", "enum", "module", "function"] },
+        "responsibility": { "type": "string" },
+        "location": { "type": "string" }
+      }
+    },
+    "internal_dependency": {
+      "type": "object",
+      "required": ["component", "depends_on", "reason"],
+      "properties": {
+        "component": { "type": "string" },
+        "depends_on": { "type": "string" },
+        "reason": { "type": "string" }
+      }
+    },
+    "criterion": {
+      "type": "object",
+      "required": ["id", "behavior"],
+      "properties": {
+        "id": { "type": "string" },
+        "behavior": { "type": "string" },
+        "test": { "type": "string" },
+        "passed": { "type": ["boolean", "null"] }
+      }
+    },
+    "errors": {
+      "type": "object",
+      "properties": {
+        "iteration": { "type": "integer" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "compilation": {
+          "type": "object",
+          "properties": {
+            "success": { "type": "boolean" },
+            "errors": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "test_results": {
+          "type": "object",
+          "properties": {
+            "total": { "type": "integer" },
+            "passed": { "type": "integer" },
+            "failed": { "type": "integer" },
+            "failures": { "type": "array" }
+          }
+        }
+      }
+    }
+  }
+}

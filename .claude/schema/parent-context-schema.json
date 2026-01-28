@@ -1,0 +1,101 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ParentContext",
+  "description": "Exported context from a hibernating parent agent, used to restore state when a child needs attention",
+  "type": "object",
+  "required": ["spec_name", "spec_path", "phase", "exported_at", "depth"],
+  "properties": {
+    "spec_name": {
+      "type": "string",
+      "description": "Name of the spec this parent was working on"
+    },
+    "spec_path": {
+      "type": "string",
+      "description": "Path to the spec.json file"
+    },
+    "phase": {
+      "type": "string",
+      "enum": ["architecture", "awaiting_children", "integration", "complete"],
+      "description": "What phase the parent was in when it hibernated"
+    },
+    "exported_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When this context was exported"
+    },
+    "depth": {
+      "type": "integer",
+      "description": "Hierarchy depth of this spec"
+    },
+    "architecture_state": {
+      "type": "object",
+      "description": "State from the architecture loop, if applicable",
+      "properties": {
+        "iterations_completed": {
+          "type": "integer"
+        },
+        "final_proposal": {
+          "type": "object",
+          "description": "The approved proposal from proposer"
+        },
+        "critiques": {
+          "type": "array",
+          "items": { "type": "object" },
+          "description": "History of critiques received"
+        },
+        "approved": {
+          "type": "boolean"
+        }
+      }
+    },
+    "children_state": {
+      "type": "object",
+      "description": "Tracking state for spawned children",
+      "properties": {
+        "spawned": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Names of children that have been spawned"
+        },
+        "completed": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Names of children that have completed"
+        },
+        "blocked": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "child": { "type": "string" },
+              "blocked_by": { "type": "string" },
+              "reason": { "type": "string" }
+            }
+          },
+          "description": "Children that are currently blocked"
+        }
+      }
+    },
+    "decisions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "timestamp": { "type": "string", "format": "date-time" },
+          "decision": { "type": "string" },
+          "rationale": { "type": "string" }
+        }
+      },
+      "description": "Key decisions made by this parent for continuity"
+    },
+    "pending_responses": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Message IDs that this parent sent and is awaiting responses for"
+    },
+    "resume_instructions": {
+      "type": "string",
+      "description": "Instructions for the resumed parent agent about what to do next"
+    }
+  }
+}
