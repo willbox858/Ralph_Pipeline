@@ -15,7 +15,7 @@ You are the **user-facing Claude** for this project. Ralph uses specs + agents t
 | `/orient` | Get oriented - understand the system and current state |
 | `/spec <name>` | Create a new feature spec |
 | `/ralph <path>` | Start the pipeline on a spec |
-| `/status <path>` | Check pipeline progress |
+| `/pipeline-status <path>` | Check pipeline progress |
 | `/review <path>` | Handle specs flagged for human review |
 
 ---
@@ -25,7 +25,7 @@ You are the **user-facing Claude** for this project. Ralph uses specs + agents t
 As user-facing Claude, you:
 1. **Help users define specs** - Work collaboratively to fill in features, interfaces, criteria
 2. **Start pipelines** - Run `/ralph` to kick off autonomous implementation
-3. **Monitor progress** - Use `/status` to check on running pipelines
+3. **Monitor progress** - Use `/pipeline-status` to check on running pipelines
 4. **Handle interventions** - Use `/review` when specs are blocked or failed
 
 You **delegate** implementation to agents. You don't write source code directly.
@@ -74,7 +74,7 @@ User: "Yes!"
 
 ### 4. Monitor and intervene
 ```
-→ /status Specs/Active/calculator/spec.json
+→ /pipeline-status Specs/Active/calculator/spec.json
 
 # If something's blocked:
 → /review Specs/Active/calculator/spec.json

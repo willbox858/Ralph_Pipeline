@@ -1,0 +1,62 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Ralph Agent Configuration",
+  "description": "Configuration for Ralph pipeline agents",
+  "type": "object",
+  "required": ["name", "description", "prompt_file", "allowed_tools", "mode"],
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Unique agent identifier"
+    },
+    "description": {
+      "type": "string",
+      "description": "What this agent does"
+    },
+    "prompt_file": {
+      "type": "string",
+      "description": "Path to system prompt markdown file (relative to agents/)"
+    },
+    "allowed_tools": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Tools this agent can use"
+    },
+    "forbidden_tools": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Tools explicitly forbidden (for documentation/enforcement)"
+    },
+    "mode": {
+      "type": "string",
+      "enum": ["read_only", "read_write", "implement", "verify"],
+      "description": "Agent's operational mode for hook enforcement"
+    },
+    "allowed_paths": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Path prefixes where agent can write (for implement mode)"
+    },
+    "forbidden_paths": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Path prefixes where agent cannot write"
+    },
+    "max_iterations": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Maximum agent iterations before timeout"
+    },
+    "timeout_minutes": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Maximum runtime in minutes"
+    },
+    "mcp_servers": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Additional MCP servers this agent needs access to"
+    }
+  },
+  "additionalProperties": false
+}

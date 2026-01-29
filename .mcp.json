@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "ralph-status": {
+      "type": "stdio",
+      "command": "python",
+      "args": [".claude/scripts/status-mcp-server.py"],
+      "env": {}
+    }
+  }
+}

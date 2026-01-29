@@ -19,6 +19,7 @@ Thumbs.db
 
 # Chat exports (don't commit conversation logs)
 *.txt
+Chat Transcripts/
 
 # Generated spec artifacts (keep template, not active specs)
 Specs/Active/*/children/

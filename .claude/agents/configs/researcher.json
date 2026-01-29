@@ -1,0 +1,31 @@
+{
+  "name": "researcher",
+  "description": "Explores codebase and gathers context for implementation, outputs research.json",
+  "prompt_file": "researcher.md",
+  "allowed_tools": [
+    "Read",
+    "Grep",
+    "Glob",
+    "Bash",
+    "WebFetch",
+    "WebSearch",
+    "Write"
+  ],
+  "forbidden_tools": [
+    "Edit",
+    "NotebookEdit"
+  ],
+  "mode": "read_write",
+  "allowed_paths": [
+    "Specs/",
+    "research.json"
+  ],
+  "forbidden_paths": [
+    "src/",
+    "Assets/Scripts/",
+    ".claude/",
+    ".git/"
+  ],
+  "max_iterations": 10,
+  "timeout_minutes": 15
+}

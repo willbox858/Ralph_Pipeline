@@ -1,0 +1,28 @@
+{
+  "name": "spec-writer",
+  "description": "Writes and updates spec.json files",
+  "prompt_file": "spec-writer.md",
+  "allowed_tools": [
+    "Read",
+    "Grep",
+    "Glob",
+    "Write"
+  ],
+  "forbidden_tools": [
+    "Edit",
+    "Bash",
+    "NotebookEdit"
+  ],
+  "mode": "read_write",
+  "allowed_paths": [
+    "Specs/"
+  ],
+  "forbidden_paths": [
+    "src/",
+    "Assets/Scripts/",
+    ".claude/",
+    ".git/"
+  ],
+  "max_iterations": 5,
+  "timeout_minutes": 10
+}

@@ -1,0 +1,30 @@
+{
+  "name": "proposer",
+  "description": "Analyzes specs and proposes architecture (is_leaf, children, classes), can write architecture docs",
+  "prompt_file": "proposer.md",
+  "allowed_tools": [
+    "Read",
+    "Grep",
+    "Glob",
+    "Bash",
+    "Write"
+  ],
+  "forbidden_tools": [
+    "Edit",
+    "NotebookEdit"
+  ],
+  "mode": "read_write",
+  "allowed_paths": [
+    "Specs/",
+    "architecture.md",
+    "ARCHITECTURE.md"
+  ],
+  "forbidden_paths": [
+    "src/",
+    "Assets/Scripts/",
+    ".claude/",
+    ".git/"
+  ],
+  "max_iterations": 5,
+  "timeout_minutes": 10
+}

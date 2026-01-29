@@ -1,0 +1,19 @@
+{
+  "name": "critic",
+  "description": "Reviews proposals and provides critiques or approval",
+  "prompt_file": "critic.md",
+  "allowed_tools": [
+    "Read",
+    "Grep",
+    "Glob",
+    "Bash"
+  ],
+  "forbidden_tools": [
+    "Edit",
+    "Write",
+    "NotebookEdit"
+  ],
+  "mode": "read_only",
+  "max_iterations": 3,
+  "timeout_minutes": 10
+}

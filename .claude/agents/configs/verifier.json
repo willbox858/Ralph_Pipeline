@@ -1,0 +1,22 @@
+{
+  "name": "verifier",
+  "description": "Runs tests and verifies implementation correctness",
+  "prompt_file": "verifier.md",
+  "allowed_tools": [
+    "Read",
+    "Grep",
+    "Glob",
+    "Bash"
+  ],
+  "forbidden_tools": [
+    "Edit",
+    "Write",
+    "NotebookEdit"
+  ],
+  "mode": "verify",
+  "mcp_servers": [
+    "unityMCP"
+  ],
+  "max_iterations": 5,
+  "timeout_minutes": 10
+}
