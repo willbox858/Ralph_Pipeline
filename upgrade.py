@@ -157,10 +157,8 @@ def create_database(root: Path, dry_run: bool = False) -> bool:
     try:
         from ralph_db import RalphDB
 
-        # Create database by opening connection
-        with RalphDB(db_path) as db:
-            # Just opening it initializes the schema
-            pass
+        # Create database - __init__ calls _init_schema() which creates tables
+        RalphDB(db_path)
 
         print("  Created database")
         return True
@@ -315,7 +313,7 @@ def install_schema_files(root: Path, source: Path, dry_run: bool = False) -> boo
     count = 0
     for schema_file in source_dir.glob("*.json"):
         target_file = target_dir / schema_file.name
-        if not target_file.exists() or source_file.read_bytes() != target_file.read_bytes():
+        if not target_file.exists() or schema_file.read_bytes() != target_file.read_bytes():
             shutil.copy2(schema_file, target_file)
             count += 1
 
