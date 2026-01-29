@@ -1,0 +1,171 @@
+{
+  "name": "stub-generation-phase",
+  "version": "1.0.0",
+  "status": "in_progress",
+  "author": "user",
+  "created": "2026-01-29",
+  "updated": "2026-01-29T12:05:01.010104+00:00",
+  "overview": {
+    "problem": "Users lack visibility into implementation structure before code is written. Specs describe intent but don't show concrete interfaces, making it hard to catch design issues early.",
+    "success": "After decomposition, Ralph generates method/class/interface stubs that users can review and modify before implementation begins. Implementers fill in existing stubs rather than inventing structure.",
+    "context": "Adds a 'scaffold' phase between architecture and implementation. Stubs serve as executable contracts - type-annotated signatures with docstrings and NotImplementedError bodies."
+  },
+  "interfaces": {
+    "provides": [
+      {
+        "name": "Scaffold Agent",
+        "description": "Generates stubs from spec interfaces and structure",
+        "members": [
+          {
+            "name": "generate_stubs",
+            "signature": "(spec: Spec) -> List[StubFile]",
+            "expectations": "Reads spec.interfaces.provides and spec.structure.classes, outputs stub files"
+          }
+        ]
+      },
+      {
+        "name": "Stub review workflow",
+        "description": "User can review/modify stubs before implementation",
+        "members": [
+          {
+            "name": "/approve-stubs",
+            "signature": "/approve-stubs <spec-path>",
+            "expectations": "Marks stubs as approved, allows implementation to proceed"
+          }
+        ]
+      }
+    ],
+    "requires": [
+      {
+        "name": "Spec schema",
+        "description": "interfaces.provides and structure.classes fields"
+      },
+      {
+        "name": "Orchestrator phases",
+        "description": "New 'scaffold' phase between architecture and implementation"
+      }
+    ],
+    "shared_types": [
+      {
+        "name": "StubFile",
+        "kind": "class",
+        "description": "Generated stub file with path and content"
+      },
+      {
+        "name": "StubStatus",
+        "kind": "enum",
+        "description": "pending_review, approved, modified"
+      }
+    ]
+  },
+  "structure": {
+    "is_leaf": false,
+    "children": [
+      {
+        "name": "scaffold-agent",
+        "responsibility": "Agent that generates stubs from specs",
+        "provides": [],
+        "requires": []
+      },
+      {
+        "name": "orchestrator-scaffold-phase",
+        "responsibility": "Add scaffold phase to orchestrator workflow",
+        "provides": [],
+        "requires": []
+      },
+      {
+        "name": "stub-approval-command",
+        "responsibility": "Slash command for reviewing and approving stubs",
+        "provides": [],
+        "requires": []
+      }
+    ],
+    "composition": "Scaffold agent generates stubs, orchestrator manages the phase, command enables user approval",
+    "classes": [],
+    "dependencies": []
+  },
+  "criteria": {
+    "acceptance": [
+      {
+        "id": "AC-001",
+        "behavior": "After architecture phase completes, scaffold agent generates stub files",
+        "test": "Create spec with interfaces, verify stubs generated in spec directory",
+        "passed": null
+      },
+      {
+        "id": "AC-002",
+        "behavior": "Stubs include type annotations, docstrings, and NotImplementedError bodies",
+        "test": "Inspect generated stubs for proper format",
+        "passed": null
+      },
+      {
+        "id": "AC-003",
+        "behavior": "Pipeline pauses after scaffold phase until user approves stubs",
+        "test": "Run pipeline, verify it waits at scaffold phase",
+        "passed": null
+      },
+      {
+        "id": "AC-004",
+        "behavior": "User can modify stubs before approval",
+        "test": "Edit stub file, approve, verify implementer uses modified version",
+        "passed": null
+      },
+      {
+        "id": "AC-005",
+        "behavior": "Implementer fills in stub bodies without changing signatures",
+        "test": "Compare pre/post implementation signatures",
+        "passed": null
+      }
+    ],
+    "edge_cases": [
+      {
+        "id": "EC-001",
+        "behavior": "Specs without interfaces.provides skip scaffold phase",
+        "test": "Run spec with no interfaces, verify no stubs generated",
+        "passed": null
+      },
+      {
+        "id": "EC-002",
+        "behavior": "Multiple languages supported (Python, TypeScript, C#)",
+        "test": "Generate stubs for each language based on tech_stack",
+        "passed": null
+      }
+    ],
+    "integration": [
+      {
+        "id": "IT-001",
+        "behavior": "Full workflow: spec -> decompose -> scaffold -> approve -> implement",
+        "test": "Run complete pipeline with stub review checkpoint",
+        "passed": null
+      }
+    ]
+  },
+  "constraints": {
+    "tech_stack": {
+      "language": "python"
+    },
+    "scope_boundaries": [
+      "Scaffold agent is a new agent in .claude/agents/",
+      "Orchestrator changes go in src/ralph/orchestrator.py (staging copy)",
+      "Command goes in .claude/commands/"
+    ],
+    "performance": [],
+    "security": [],
+    "open_questions": []
+  },
+  "verification": {
+    "tests_passed": null,
+    "lint_passed": null,
+    "build_passed": null,
+    "deviations": [],
+    "summary": ""
+  },
+  "runtime": {
+    "depth": 0,
+    "ralph_iteration": 0,
+    "all_tests_passed": false,
+    "integration_tests_passed": false,
+    "depends_on": [],
+    "errors": null
+  }
+}

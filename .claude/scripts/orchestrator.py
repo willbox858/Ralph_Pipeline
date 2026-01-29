@@ -58,6 +58,102 @@ from spec import (
 from ralph_db import get_db, RalphDB
 from ralph_db import Spec as DBSpec, Message as DBMessage
 
+# Import worktree and file ownership management
+from worktree import WorktreeManager, BranchInfo, WorktreeInfo, MergeResult, GitError
+from file_ownership import FileOwnershipTracker, ClaimResult
+import atexit
+import signal
+
+
+# =============================================================================
+# PID FILE MANAGEMENT (Singleton Enforcement)
+# =============================================================================
+
+_PID_FILE: Optional[Path] = None
+
+
+def _get_project_root() -> Path:
+    """Find project root by looking for .claude directory."""
+    cwd = Path.cwd()
+    for parent in [cwd] + list(cwd.parents):
+        if (parent / ".claude").is_dir():
+            return parent
+    return cwd
+
+
+def _cleanup_pid_file():
+    """Remove PID file on exit."""
+    global _PID_FILE
+    if _PID_FILE and _PID_FILE.exists():
+        try:
+            _PID_FILE.unlink()
+        except OSError:
+            pass
+
+
+def _signal_handler(signum, frame):
+    """Handle termination signals."""
+    _cleanup_pid_file()
+    sys.exit(128 + signum)
+
+
+def acquire_singleton_lock() -> bool:
+    """
+    Acquire singleton lock by creating PID file.
+    Returns True if lock acquired, False if another instance is running.
+    """
+    global _PID_FILE
+    root = _get_project_root()
+    _PID_FILE = root / ".orchestrator.pid"
+
+    # Check for existing lock
+    if _PID_FILE.exists():
+        try:
+            content = _PID_FILE.read_text().strip()
+            existing_pid = int(content.split()[0])
+
+            # Check if process is still running
+            if sys.platform == "win32":
+                import subprocess
+                result = subprocess.run(
+                    ["tasklist", "/FI", f"PID eq {existing_pid}", "/NH"],
+                    capture_output=True, text=True
+                )
+                if str(existing_pid) in result.stdout:
+                    return False  # Another orchestrator is running
+            else:
+                try:
+                    os.kill(existing_pid, 0)
+                    return False  # Process exists
+                except OSError:
+                    pass  # Process doesn't exist, stale PID file
+
+            # Stale PID file, remove it
+            _PID_FILE.unlink()
+        except (ValueError, IndexError, OSError):
+            # Corrupt PID file, remove it
+            try:
+                _PID_FILE.unlink()
+            except OSError:
+                pass
+
+    # Create PID file
+    try:
+        _PID_FILE.write_text(f"{os.getpid()}\n")
+    except OSError as e:
+        print(f"WARNING: Could not create PID file: {e}")
+        return True  # Continue anyway
+
+    # Register cleanup
+    atexit.register(_cleanup_pid_file)
+
+    # Handle signals for cleanup
+    if sys.platform != "win32":
+        signal.signal(signal.SIGTERM, _signal_handler)
+        signal.signal(signal.SIGHUP, _signal_handler)
+
+    return True
+
 
 # =============================================================================
 # CONFIGURATION
@@ -155,6 +251,7 @@ class SpecStatus:
     current_agent: Optional[str] = None
     iteration: int = 0
     error: Optional[str] = None
+    worktree_path: Optional[Path] = None  # Path to spec's worktree (if created)
 
 
 # =============================================================================
@@ -188,6 +285,33 @@ class OrchestratorState:
         self.pending_responses: dict[str, asyncio.Future] = {}
         self.active_tasks: dict[str, asyncio.Task] = {}
 
+        # Worktree and file ownership managers
+        self.worktree_mgr: Optional[WorktreeManager] = None
+        self.file_tracker: Optional[FileOwnershipTracker] = None
+
+    def init_worktree_management(self):
+        """Initialize worktree and file ownership managers."""
+        try:
+            self.worktree_mgr = WorktreeManager()
+            self.file_tracker = FileOwnershipTracker()
+            log("Worktree management initialized", "INFO")
+        except GitError as e:
+            log(f"Worktree management unavailable: {e}", "WARN")
+            self.worktree_mgr = None
+            self.file_tracker = None
+
+    def cleanup_orphaned_worktrees(self):
+        """Clean up stale/orphaned worktrees on startup."""
+        if not self.worktree_mgr:
+            return
+
+        try:
+            # Prune stale worktree references
+            self.worktree_mgr._run_git_no_check('worktree', 'prune')
+            log("Pruned stale worktree references", "INFO")
+        except Exception as e:
+            log(f"Failed to prune worktrees: {e}", "WARN")
+
     # =========================================================================
     # SPEC OPERATIONS
     # =========================================================================
@@ -211,7 +335,8 @@ class OrchestratorState:
                 parent=existing.data.get("parent"),
                 children=existing.data.get("children", []),
                 depends_on=existing.data.get("depends_on", []),
-                iteration=existing.data.get("iteration", 0)
+                iteration=existing.data.get("iteration", 0),
+                worktree_path=Path(existing.data["worktree_path"]) if existing.data.get("worktree_path") else None
             )
             return spec_id
 
@@ -225,7 +350,8 @@ class OrchestratorState:
                 "children": [],
                 "depends_on": depends_on or [],
                 "iteration": 0,
-                "phase": Phase.PENDING.value
+                "phase": Phase.PENDING.value,
+                "worktree_path": None
             },
             is_leaf=is_leaf,
             depth=depth
@@ -271,7 +397,8 @@ class OrchestratorState:
                 "iteration": status.iteration,
                 "phase": status.phase.value,
                 "current_agent": status.current_agent,
-                "error": status.error
+                "error": status.error,
+                "worktree_path": str(status.worktree_path) if status.worktree_path else None
             }
         )
 
@@ -282,6 +409,136 @@ class OrchestratorState:
             status.phase = phase
             self.db.update_spec(status.spec_id, status=phase.value)
             self.db.log_event(status.spec_id, "phase_changed", {"phase": phase.value})
+
+    # =========================================================================
+    # WORKTREE OPERATIONS
+    # =========================================================================
+
+    def create_worktree_for_spec(self, spec_path: str, parent_spec_name: Optional[str] = None) -> Optional[Path]:
+        """
+        Create a worktree for a spec.
+
+        Args:
+            spec_path: Path to the spec.json file
+            parent_spec_name: Name of parent spec (if any) for hierarchical branching
+
+        Returns:
+            Path to the worktree, or None if worktree management is unavailable
+        """
+        if not self.worktree_mgr:
+            return None
+
+        try:
+            # Determine parent branch
+            if parent_spec_name:
+                parent_status = self._specs.get(parent_spec_name)
+                if parent_status and parent_status.worktree_path:
+                    # Get parent's branch name
+                    parent_branch = self.worktree_mgr._spec_path_to_branch_name(str(parent_status.path))
+                else:
+                    parent_branch = 'main'
+            else:
+                parent_branch = 'main'
+
+            # Create branch
+            branch_info = self.worktree_mgr.create_spec_branch(spec_path, parent_branch)
+            log(f"Created branch {branch_info.name} from {parent_branch}", "INFO")
+
+            # Create worktree
+            worktree_info = self.worktree_mgr.create_worktree(branch_info.name)
+            log(f"Created worktree at {worktree_info.path}", "INFO")
+
+            return Path(worktree_info.path)
+
+        except GitError as e:
+            log(f"Failed to create worktree: {e}", "ERROR")
+            return None
+
+    def claim_files_for_spec(self, spec_path: str, spec: Spec) -> ClaimResult:
+        """
+        Claim file ownership for a spec based on its classes.
+
+        Args:
+            spec_path: Path to the spec.json file
+            spec: The loaded spec object
+
+        Returns:
+            ClaimResult with success status and any conflicts
+        """
+        if not self.file_tracker:
+            return ClaimResult(success=True, message="File tracking unavailable")
+
+        # Extract patterns from spec.classes
+        patterns = []
+        for cls in spec.classes:
+            if hasattr(cls, 'location') and cls.location:
+                # Use the location as-is (may contain wildcards)
+                patterns.append(cls.location)
+
+        if not patterns:
+            return ClaimResult(success=True, patterns=[], message="No files to claim")
+
+        return self.file_tracker.claim_files(spec_path, patterns)
+
+    def merge_completed_spec(self, spec_path: str, parent_spec_name: Optional[str] = None) -> MergeResult:
+        """
+        Merge a completed spec's worktree into parent branch.
+
+        Args:
+            spec_path: Path to the spec.json file
+            parent_spec_name: Name of parent spec (if any)
+
+        Returns:
+            MergeResult with success status and conflict info if applicable
+        """
+        if not self.worktree_mgr:
+            return MergeResult(success=True, message="Worktree management unavailable")
+
+        try:
+            # Get branch names
+            child_branch = self.worktree_mgr._spec_path_to_branch_name(spec_path)
+
+            if parent_spec_name:
+                parent_status = self._specs.get(parent_spec_name)
+                if parent_status:
+                    parent_branch = self.worktree_mgr._spec_path_to_branch_name(str(parent_status.path))
+                else:
+                    parent_branch = 'main'
+            else:
+                parent_branch = 'main'
+
+            # Perform merge
+            result = self.worktree_mgr.merge_up(child_branch, parent_branch)
+
+            if result.success:
+                log(f"Merged {child_branch} into {parent_branch}", "SUCCESS")
+            elif result.conflict:
+                log(f"Merge conflict: {result.conflict_files}", "WARN")
+
+            return result
+
+        except GitError as e:
+            log(f"Failed to merge: {e}", "ERROR")
+            return MergeResult(success=False, message=str(e))
+
+    def cleanup_spec_worktree(self, spec_path: str, release_files: bool = True):
+        """
+        Clean up worktree and release file claims for a spec.
+
+        Args:
+            spec_path: Path to the spec.json file
+            release_files: Whether to release file ownership claims
+        """
+        if self.worktree_mgr:
+            try:
+                self.worktree_mgr.cleanup(spec_path)
+                log(f"Cleaned up worktree for {spec_path}", "INFO")
+            except GitError as e:
+                log(f"Failed to cleanup worktree: {e}", "WARN")
+
+        if release_files and self.file_tracker:
+            self.file_tracker.release_files(spec_path)
+            log(f"Released file claims for {spec_path}", "INFO")
 
     # =========================================================================
     # MESSAGE OPERATIONS
@@ -975,7 +1232,8 @@ def create_mcp_tools():
                         "iteration": status.iteration,
                         "current_agent": status.current_agent,
                         "children": status.children,
-                        "error": status.error
+                        "error": status.error,
+                        "worktree_path": str(status.worktree_path) if status.worktree_path else None
                     }, indent=2)
                 }]
             }
@@ -986,6 +1244,74 @@ def create_mcp_tools():
                     "type": "text",
                     "text": json.dumps(get_status_dict(), indent=2)
                 }]
+            }
+
+    @tool("add_root_spec", "Hot-add a new root spec to the running orchestrator", {
+        "spec_path": str
+    })
+    async def add_root_spec(args: dict) -> dict:
+        """Add a new root spec to be processed by the orchestrator."""
+        spec_path_str = args.get("spec_path", "")
+
+        if not spec_path_str:
+            return {
+                "content": [{"type": "text", "text": "Error: spec_path is required"}],
+                "error": True
+            }
+
+        spec_path = Path(spec_path_str)
+
+        # Handle relative paths
+        if not spec_path.is_absolute():
+            spec_path = Path.cwd() / spec_path
+
+        if not spec_path.exists():
+            return {
+                "content": [{"type": "text", "text": f"Error: Spec not found: {spec_path}"}],
+                "error": True
+            }
+
+        try:
+            # Load and register the spec
+            new_spec = load_spec(spec_path)
+
+            # Check if already registered
+            existing = state.get_spec_status(new_spec.name)
+            if existing:
+                return {
+                    "content": [{
+                        "type": "text",
+                        "text": f"Spec '{new_spec.name}' is already registered (status: {existing.phase.value})"
+                    }]
+                }
+
+            # Register as new root
+            state.register_spec(
+                name=new_spec.name,
+                path=spec_path,
+                depth=0
+            )
+
+            # Set status to ready so it gets picked up
+            new_spec.status = "ready"
+            save_spec(new_spec)
+
+            # Wake the main loop if it's waiting
+            if "_orchestrator_wake" in state.wake_events:
+                state.wake_events["_orchestrator_wake"].set()
+
+            log(f"Hot-added root spec: {new_spec.name}", "INFO")
+
+            return {
+                "content": [{
+                    "type": "text",
+                    "text": f"Successfully added root spec '{new_spec.name}' from {spec_path}. It will be processed in the next cycle."
+                }]
+            }
+        except Exception as e:
+            return {
+                "content": [{"type": "text", "text": f"Error adding spec: {e}"}],
+                "error": True
             }
 
     # Create the server
@@ -1006,6 +1332,8 @@ def create_mcp_tools():
             submit_critique,
             report_verification,
             get_pipeline_status,
+            # Hot-add specs
+            add_root_spec,
         ]
     )
 
@@ -1034,6 +1362,7 @@ def log(msg: str, level: str = "INFO", spec: str = "", depth: int = 0):
         "VERIFY": "v",
         "INTEGRATE": "&",
         "BLOCKED": "!X",
+        "WORKTREE": "wt",
     }.get(level, "-")
 
     spec_str = f"[{spec}] " if spec else ""
@@ -1259,10 +1588,18 @@ async def spawn_agent(
     agent_type: str,
     spec: Spec,
     mcp_server,
-    extra_context: dict = None
+    extra_context: dict = None,
+    worktree_path: Optional[Path] = None
 ) -> dict:
     """
     Spawn an agent and return its result.
+
+    Args:
+        agent_type: Type of agent to spawn
+        spec: The spec being processed
+        mcp_server: MCP server for agent communication
+        extra_context: Additional context for the agent
+        worktree_path: Optional path to worktree (used for implementer)
 
     Returns:
         {
@@ -1289,7 +1626,8 @@ async def spawn_agent(
         run_id = state.start_agent(spec.name, agent_type, status.iteration)
         state.db.log_event(status.spec_id, "agent_spawned", {
             "agent_type": agent_type,
-            "run_id": run_id
+            "run_id": run_id,
+            "worktree_path": str(worktree_path) if worktree_path else None
         })
     else:
         run_id = -1
@@ -1320,7 +1658,13 @@ async def spawn_agent(
     except ImportError:
         return {"success": False, "error": "pip install claude-agent-sdk"}
 
-    spec_dir = spec.path.parent if spec.path else Path.cwd()
+    # Determine working directory
+    # For implementer, use worktree if available; otherwise use spec directory
+    if agent_type == "implementer" and worktree_path:
+        cwd = worktree_path
+        log(f"Using worktree: {worktree_path}", "WORKTREE", spec.name, spec.depth)
+    else:
+        cwd = spec.path.parent if spec.path else Path.cwd()
 
     # Load agent configuration from JSON
     agent_config = load_agent_config(agent_type)
@@ -1332,6 +1676,8 @@ async def spawn_agent(
     user_prompt += f"\n\n[SYSTEM: Your spec name for MCP calls is '{spec.name}']\n"
     user_prompt += f"[SYSTEM: You are running in {agent_config.get('mode', 'unknown')} mode]\n"
     user_prompt += f"[SYSTEM: Available tools: {', '.join(agent_config.get('allowed_tools', []))}]\n"
+    if worktree_path:
+        user_prompt += f"[SYSTEM: Working in isolated worktree: {worktree_path}]\n"
 
     # Get tools from config
     tools = get_agent_tools(agent_config)
@@ -1342,7 +1688,7 @@ async def spawn_agent(
         allowed_tools=tools,
         mcp_servers={"orchestrator": mcp_server},
         permission_mode="bypassPermissions",
-        cwd=str(spec_dir),
+        cwd=str(cwd),
         setting_sources=["project"],
         model=CONFIG.model,
     )
@@ -1526,11 +1872,39 @@ async def run_architecture_loop(spec: Spec, mcp_server) -> tuple[bool, Optional[
 
 
 async def run_implementation_loop(spec: Spec, mcp_server) -> bool:
-    """Run Implementer <-> Verifier loop."""
+    """Run Implementer <-> Verifier loop with worktree isolation."""
     log("Starting implementation loop", "IMPL", spec.name, spec.depth)
 
     state = get_state()
     status = state.get_spec_status(spec.name)
+
+    # Create worktree for this spec if worktree management is available
+    worktree_path = None
+    if state.worktree_mgr and status:
+        # Create worktree
+        worktree_path = state.create_worktree_for_spec(
+            str(spec.path),
+            status.parent
+        )
+
+        if worktree_path:
+            # Store worktree path in status
+            status.worktree_path = worktree_path
+            state.set_spec_status(spec.name, status)
+            log(f"Created worktree at {worktree_path}", "WORKTREE", spec.name, spec.depth)
+
+            # Claim files based on spec.classes
+            claim_result = state.claim_files_for_spec(str(spec.path), spec)
+            if not claim_result.success:
+                log(f"File ownership conflict: {claim_result.message}", "ERROR", spec.name, spec.depth)
+                # Flag for review with conflict details
+                state.flag_for_review(spec.name, "file_ownership_conflict", {
+                    "conflicts": claim_result.conflicts,
+                    "message": claim_result.message
+                })
+                return False
+            elif claim_result.patterns:
+                log(f"Claimed files: {claim_result.patterns}", "INFO", spec.name, spec.depth)
 
     while spec.ralph_iteration < CONFIG.max_iterations:
         spec.ralph_iteration += 1
@@ -1540,8 +1914,8 @@ async def run_implementation_loop(spec: Spec, mcp_server) -> bool:
             state.update_phase(spec.name, Phase.IMPLEMENTATION)
             status.iteration = spec.ralph_iteration
 
-        # Implementer
-        result = await spawn_agent("implementer", spec, mcp_server)
+        # Implementer - pass worktree_path for isolated execution
+        result = await spawn_agent("implementer", spec, mcp_server, worktree_path=worktree_path)
 
         # Check for hibernation
         if result.get("hibernation_request"):
@@ -1565,7 +1939,7 @@ async def run_implementation_loop(spec: Spec, mcp_server) -> bool:
         if status:
             state.update_phase(spec.name, Phase.VERIFICATION)
 
-        result = await spawn_agent("verifier", spec, mcp_server)
+        result = await spawn_agent("verifier", spec, mcp_server, worktree_path=worktree_path)
         if not result.get("success"):
             return False
 
@@ -1744,7 +2118,7 @@ async def process_leaf(spec_path: Path, mcp_server, depth: int) -> bool:
         state.update_phase(spec.name, Phase.FAILED)
         return False
 
-    # Implementation loop
+    # Implementation loop (with worktree isolation)
     success = await run_implementation_loop(spec, mcp_server)
 
     # Check if hibernated vs completed
@@ -1756,6 +2130,21 @@ async def process_leaf(spec_path: Path, mcp_server, depth: int) -> bool:
     if success:
         state.update_phase(spec.name, Phase.COMPLETE)
         spec.status = "complete"
+
+        # Merge completed work into parent branch
+        if status:
+            merge_result = state.merge_completed_spec(str(spec_path), status.parent)
+            if merge_result.conflict:
+                # Merge conflict - flag for review
+                state.flag_for_review(spec.name, "merge_conflict", {
+                    "conflict_files": merge_result.conflict_files,
+                    "message": merge_result.message
+                })
+                spec.status = "blocked"
+                state.update_phase(spec.name, Phase.BLOCKED)
+            else:
+                # Clean up worktree and release file claims
+                state.cleanup_spec_worktree(str(spec_path), release_files=True)
     else:
         state.update_phase(spec.name, Phase.FAILED)
         spec.status = "failed"
@@ -1763,6 +2152,10 @@ async def process_leaf(spec_path: Path, mcp_server, depth: int) -> bool:
             "iterations": spec.ralph_iteration,
             "errors": spec.errors.__dict__ if spec.errors else None
         })
+
+        # Clean up worktree on failure but keep it for debugging (release file claims only)
+        if status:
+            state.cleanup_spec_worktree(str(spec_path), release_files=True)
 
     save_spec(spec)
 
@@ -1913,17 +2306,20 @@ async def process_spec(spec_path: Path, mcp_server, depth: int = 0) -> bool:
 # MAIN ORCHESTRATOR LOOP
 # =============================================================================
 
-async def orchestrator_main(root_spec_path: Path):
+async def orchestrator_main(root_spec_paths: list[Path]):
     """
     Main orchestration loop.
 
-    1. Initialize root spec
+    1. Initialize root specs (supports multiple)
     2. Process specs in parallel (respecting dependencies)
     3. Handle hibernation/wake cycles
     4. Trigger integration when siblings complete
     5. Continue until all complete or blocked
     """
-    log(f"Starting orchestrator for {root_spec_path}", "INFO")
+    if len(root_spec_paths) == 1:
+        log(f"Starting orchestrator for {root_spec_paths[0]}", "INFO")
+    else:
+        log(f"Starting orchestrator for {len(root_spec_paths)} root specs", "INFO")
 
     # Initialize database and state
     db = get_db()
@@ -1932,19 +2328,37 @@ async def orchestrator_main(root_spec_path: Path):
 
     log(f"Database initialized at {db.db_path}", "INFO")
 
+    # Initialize worktree management
+    STATE.init_worktree_management()
+
+    # Clean up orphaned worktrees from previous runs
+    STATE.cleanup_orphaned_worktrees()
+
     # Create MCP server
     mcp_server = create_mcp_tools()
 
-    # Initialize root
-    root_spec = load_spec(root_spec_path)
-    STATE.register_spec(
-        name=root_spec.name,
-        path=root_spec_path,
-        depth=0
-    )
+    # Initialize all root specs
+    for root_spec_path in root_spec_paths:
+        root_spec = load_spec(root_spec_path)
+        STATE.register_spec(
+            name=root_spec.name,
+            path=root_spec_path,
+            depth=0
+        )
+        log(f"Registered root spec: {root_spec.name}", "INFO")
 
-    # Start processing root
-    await process_spec(root_spec_path, mcp_server, depth=0)
+    # Track root spec names for completion checking
+    root_spec_names = []
+    for root_spec_path in root_spec_paths:
+        root_spec = load_spec(root_spec_path)
+        root_spec_names.append(root_spec.name)
+
+    # Start processing all roots
+    for root_spec_path in root_spec_paths:
+        await process_spec(root_spec_path, mcp_server, depth=0)
+
+    # Create wake event for hot-adding specs
+    STATE.wake_events["_orchestrator_wake"] = asyncio.Event()
 
     # Main loop
     iteration = 0
@@ -1953,10 +2367,18 @@ async def orchestrator_main(root_spec_path: Path):
     while iteration < max_iterations:
         iteration += 1
 
-        # Check for completion
-        root_status = STATE.get_spec_status(root_spec.name)
-        if root_status and root_status.phase in [Phase.COMPLETE, Phase.FAILED, Phase.BLOCKED]:
-            log(f"Root spec reached terminal state: {root_status.phase.value}", "INFO")
+        # Check for completion of ALL root specs (including hot-added ones)
+        # Root specs are those with depth=0
+        all_roots_terminal = True
+        active_roots = 0
+        for name, status in STATE._specs.items():
+            if status.depth == 0:  # Root spec
+                active_roots += 1
+                if status.phase not in [Phase.COMPLETE, Phase.FAILED, Phase.BLOCKED]:
+                    all_roots_terminal = False
+
+        if all_roots_terminal and active_roots > 0:
+            log("All root specs reached terminal state", "INFO")
             break
 
         # Get ready specs
@@ -2065,6 +2487,7 @@ def get_status_dict() -> dict:
             "current_agent": s.current_agent,
             "iteration": s.iteration,
             "children": s.children,
+            "worktree_path": str(s.worktree_path) if s.worktree_path else None,
         }
 
     return {
@@ -2114,7 +2537,8 @@ async def status_server(port: int = 8765):
 
 def main():
     parser = argparse.ArgumentParser(description="Ralph Orchestrator v4")
-    parser.add_argument("--spec", required=True, help="Path to root spec.json")
+    parser.add_argument("--spec", action="append", required=True,
+                        help="Path to root spec.json (can specify multiple)")
     parser.add_argument("--dry-run", action="store_true", help="Print actions without executing")
     parser.add_argument("--live", action="store_true", help="Actually call Agent SDK")
     parser.add_argument("--max-depth", type=int, default=3)
@@ -2137,9 +2561,18 @@ def main():
     CONFIG.live = args.live
     CONFIG.model = args.model
 
-    spec_path = Path(args.spec)
-    if not spec_path.exists():
-        print(f"ERROR: Spec not found: {spec_path}")
+    # Validate all spec paths
+    spec_paths = [Path(s) for s in args.spec]
+    for spec_path in spec_paths:
+        if not spec_path.exists():
+            print(f"ERROR: Spec not found: {spec_path}")
+            sys.exit(1)
+
+    # Acquire singleton lock
+    if not acquire_singleton_lock():
+        print("ERROR: Another orchestrator instance is already running.")
+        print("Check .orchestrator.pid for the running process ID.")
+        print("Use /pipeline-status to check its progress, or kill it to start a new one.")
         sys.exit(1)
 
     # Initialize DB with custom path if provided
@@ -2153,7 +2586,12 @@ def main():
     print("=" * 60)
     print(f"RALPH ORCHESTRATOR v4 [{mode}]")
     print("=" * 60)
-    print(f"Root Spec:       {spec_path}")
+    if len(spec_paths) == 1:
+        print(f"Root Spec:       {spec_paths[0]}")
+    else:
+        print(f"Root Specs:      {len(spec_paths)} specs")
+        for sp in spec_paths:
+            print(f"                 - {sp}")
     print(f"Max Depth:       {CONFIG.max_depth}")
     print(f"Max Concurrent:  {CONFIG.max_concurrent_agents}")
     print(f"Max Agents:      {CONFIG.max_total_agents}")
@@ -2164,7 +2602,7 @@ def main():
         if args.status_port > 0:
             await status_server(args.status_port)
 
-        return await orchestrator_main(spec_path)
+        return await orchestrator_main(spec_paths)
 
     try:
         success = asyncio.run(run())

@@ -372,7 +372,6 @@ async def user_facing_tool_hook(input_data: dict, tool_use_id: Optional[str], co
         allowed_patterns = [
             r'python.*orchestrator\.py',
             r'python.*check-pipeline-status\.py',
-            r'python.*check-status\.py',
             r'git\s+(status|log|diff|branch)',
             r'ls\s',
             r'dir\s',

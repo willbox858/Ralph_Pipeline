@@ -1,0 +1,161 @@
+{
+  "name": "orchestrator-worktree-integration",
+  "version": "1.0.0",
+  "status": "complete",
+  "author": "user",
+  "created": "2026-01-29",
+  "updated": "2026-01-29T12:15:53.337643+00:00",
+  "overview": {
+    "problem": "The orchestrator runs all agents in the main working directory, which can cause conflicts when multiple specs modify the same files and makes rollback difficult.",
+    "success": "Each spec gets an isolated git worktree. Agents work in their worktree, changes merge up on completion, and rollback is as simple as deleting the worktree.",
+    "context": "WorktreeManager and FileOwnershipTracker are implemented in .claude/lib/. A copy of orchestrator.py is at src/ralph/orchestrator.py for modification. After review, user will manually deploy to .claude/scripts/. Branching model: root specs branch from main, child specs branch from parent's worktree. On crash recovery, existing worktrees are preserved and management resumes."
+  },
+  "interfaces": {
+    "provides": [
+      {
+        "name": "Isolated agent execution",
+        "description": "Agents run in spec-specific worktrees",
+        "members": [
+          {
+            "name": "create_worktree_for_spec",
+            "signature": "(spec_path: str) -> Path",
+            "expectations": "Creates branch and worktree, returns worktree path"
+          },
+          {
+            "name": "merge_completed_spec",
+            "signature": "(spec_path: str) -> MergeResult",
+            "expectations": "Merges completed spec's worktree into parent branch"
+          }
+        ]
+      },
+      {
+        "name": "File ownership tracking",
+        "description": "Prevents multiple specs from modifying same files",
+        "members": [
+          {
+            "name": "claim_files_for_spec",
+            "signature": "(spec_path: str, files: List[str]) -> ClaimResult",
+            "expectations": "Claims file ownership, fails if already owned"
+          }
+        ]
+      }
+    ],
+    "requires": [
+      {
+        "name": "WorktreeManager",
+        "description": "From .claude/lib/worktree.py"
+      },
+      {
+        "name": "FileOwnershipTracker",
+        "description": "From .claude/lib/file_ownership.py"
+      }
+    ],
+    "shared_types": []
+  },
+  "structure": {
+    "is_leaf": true,
+    "children": [],
+    "composition": "Modifies copy of orchestrator.py in src/ralph/ for review before deployment",
+    "classes": [
+      {
+        "name": "Orchestrator with worktree integration",
+        "type": "modification",
+        "responsibility": "Add worktree creation, agent isolation, and merge-on-complete to orchestrator",
+        "location": "src/ralph/orchestrator.py"
+      }
+    ],
+    "dependencies": [
+      {
+        "component": "orchestrator-worktree-integration",
+        "depends_on": "git-worktree-isolation",
+        "reason": "Uses WorktreeManager and FileOwnershipTracker"
+      }
+    ]
+  },
+  "criteria": {
+    "acceptance": [
+      {
+        "id": "AC-001",
+        "behavior": "Orchestrator creates worktree when spec enters implementation phase",
+        "test": "test_creates_worktree_on_spec_start",
+        "passed": null
+      },
+      {
+        "id": "AC-002",
+        "behavior": "Implementer agent runs with cwd set to spec's worktree",
+        "test": "test_agent_runs_in_worktree",
+        "passed": null
+      },
+      {
+        "id": "AC-003",
+        "behavior": "On spec completion, changes merge into parent branch",
+        "test": "test_merges_on_completion",
+        "passed": null
+      },
+      {
+        "id": "AC-004",
+        "behavior": "On spec failure, worktree is cleaned up without affecting main",
+        "test": "test_cleanup_on_failure",
+        "passed": null
+      },
+      {
+        "id": "AC-005",
+        "behavior": "FileOwnershipTracker prevents concurrent specs from claiming same files",
+        "test": "test_file_ownership_prevents_conflicts",
+        "passed": null
+      }
+    ],
+    "edge_cases": [
+      {
+        "id": "EC-001",
+        "behavior": "Merge conflicts mark spec as blocked with conflict info",
+        "test": "test_merge_conflict_blocks_spec",
+        "passed": null
+      },
+      {
+        "id": "EC-002",
+        "behavior": "Stale worktrees are cleaned up on orchestrator startup",
+        "test": "test_cleans_orphaned_worktrees",
+        "passed": null
+      }
+    ],
+    "integration": [
+      {
+        "id": "IT-001",
+        "behavior": "Full spec lifecycle works with worktree isolation end-to-end",
+        "test": "test_full_spec_lifecycle_with_isolation",
+        "passed": null
+      }
+    ]
+  },
+  "constraints": {
+    "tech_stack": {
+      "language": "python"
+    },
+    "scope_boundaries": [
+      "Modifies src/ralph/orchestrator.py only",
+      "Must not break existing orchestrator functionality",
+      "Tests go in tests/ralph/test_orchestrator_worktree.py"
+    ],
+    "performance": [],
+    "security": [],
+    "open_questions": []
+  },
+  "verification": {
+    "tests_passed": null,
+    "lint_passed": null,
+    "build_passed": null,
+    "deviations": [],
+    "summary": ""
+  },
+  "runtime": {
+    "depth": 0,
+    "ralph_iteration": 1,
+    "all_tests_passed": true,
+    "integration_tests_passed": false,
+    "depends_on": [
+      "git-worktree-isolation"
+    ],
+    "errors": null
+  }
+}

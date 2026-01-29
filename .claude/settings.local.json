@@ -1,7 +1,13 @@
 {
   "permissions": {
     "allow": [
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "mcp__ralph-status__ralph_pipeline_summary",
+      "mcp__ralph-status__ralph_get_messages",
+      "mcp__ralph-status__ralph_get_spec",
+      "mcp__ralph-status__ralph_list_specs",
+      "Bash(wmic process:*)",
+      "Bash(findstr:*)"
     ]
   }
 }

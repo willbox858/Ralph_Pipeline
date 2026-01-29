@@ -128,30 +128,34 @@ Agents communicate with the orchestrator via MCP tools:
 ```
 .claude/
 ├── scripts/
-│   ├── orchestrator.py         # Main v4 orchestrator
+│   ├── orchestrator.py          # Main v4 orchestrator
 │   ├── check-pipeline-status.py # Status checker for user-facing Claude
-│   ├── ralph-recursive-v3.py   # v3 (hibernating parents, no parallel)
-│   ├── ralph-recursive-v2.py   # v2 (basic Agent SDK)
-│   └── ralph-recursive.py      # v1 (broken, deprecated)
+│   ├── status-mcp-server.py     # MCP server for ralph_* tools
+│   ├── scaffold-children.py     # Child directory scaffolding
+│   ├── migrate-specs-to-db.py   # Migration utility
+│   └── init-orchestrator.py     # Initialization utility
 │
 ├── agents/
-│   ├── researcher.md           # NEW: Gathers context before impl
-│   ├── proposer.md             # Architect: proposes structure
-│   ├── critic.md               # Architect: reviews proposals
-│   ├── implementer.md          # Writes code
-│   ├── verifier.md             # Runs tests, structured output
-│   └── coordinator.md          # (unused in v4, Python handles)
+│   ├── researcher.md            # Gathers context before implementation
+│   ├── proposer.md              # Proposes architecture/structure
+│   ├── critic.md                # Reviews proposals
+│   ├── implementer.md           # Writes code
+│   ├── verifier.md              # Runs tests, structured output
+│   └── spec-writer.md           # Helps create specs
 │
 ├── schema/
 │   ├── spec-schema.json
-│   ├── message-schema.json     # Updated with priority, wake_signals
+│   ├── message-schema.json      # Updated with priority, wake_signals
 │   ├── parent-context-schema.json
 │   └── verification-result-schema.json
 │
 ├── lib/
-│   └── spec.py                 # Spec dataclass and utilities
+│   ├── spec.py                  # Spec dataclass and utilities
+│   ├── ralph_db.py              # Database operations
+│   ├── hooks.py                 # Hook utilities
+│   └── message_hooks.py         # Message routing hooks
 │
-└── settings.json               # Hooks config
+└── settings.json                # Hooks config
 ```
 
 ---

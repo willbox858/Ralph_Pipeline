@@ -106,8 +106,8 @@ You are the orchestrator. Direct source file modifications are not allowed.
 
 File: {file_path}
 
-Instead, run ralph-recursive.py to spawn implementation agents:
-  python3 .claude/scripts/ralph-recursive.py --spec ./spec.json
+Instead, run orchestrator.py to spawn implementation agents:
+  python3 .claude/scripts/orchestrator.py --spec ./spec.json --live
 
 Note: You CAN directly modify spec.json and .claude/ config files.
 """

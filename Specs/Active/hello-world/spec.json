@@ -1,0 +1,78 @@
+{
+  "name": "hello-world",
+  "version": "1.0.0",
+  "status": "complete",
+  "author": "user",
+  "created": "2026-01-29",
+  "updated": "2026-01-29T10:09:44.126172+00:00",
+  "overview": {
+    "problem": "Need a simple test to verify the implementer agent can write files.",
+    "success": "A single Python file exists with a greet function.",
+    "context": "Sanity check for implementer agent."
+  },
+  "interfaces": {
+    "provides": [
+      {
+        "name": "greet",
+        "description": "Returns a greeting string",
+        "members": [
+          {
+            "name": "greet",
+            "signature": "greet(name: str) -> str",
+            "expectations": "Returns 'Hello, {name}!'"
+          }
+        ]
+      }
+    ],
+    "requires": [],
+    "shared_types": []
+  },
+  "structure": {
+    "is_leaf": true,
+    "children": [],
+    "composition": "",
+    "classes": [
+      {
+        "name": "greeter",
+        "type": "module",
+        "responsibility": "Contains greet function",
+        "location": "src/hello/greeter.py"
+      }
+    ],
+    "dependencies": []
+  },
+  "criteria": {
+    "acceptance": [
+      {
+        "id": "AC-001",
+        "behavior": "",
+        "test": "",
+        "passed": null
+      }
+    ],
+    "edge_cases": [],
+    "integration": []
+  },
+  "constraints": {
+    "tech_stack": "python",
+    "scope_boundaries": [],
+    "performance": [],
+    "security": [],
+    "open_questions": []
+  },
+  "verification": {
+    "tests_passed": null,
+    "lint_passed": null,
+    "build_passed": null,
+    "deviations": [],
+    "summary": ""
+  },
+  "runtime": {
+    "depth": 0,
+    "ralph_iteration": 1,
+    "all_tests_passed": true,
+    "integration_tests_passed": false,
+    "depends_on": [],
+    "errors": null
+  }
+}

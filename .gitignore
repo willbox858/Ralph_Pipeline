@@ -1,6 +1,11 @@
 # Orchestrator/Agent markers
 .orchestrator-lock
+.orchestrator.pid
 .agent-active
+
+# Runtime database
+.ralph/ralph.db
+.ralph/*.db-journal
 
 # Python
 __pycache__/

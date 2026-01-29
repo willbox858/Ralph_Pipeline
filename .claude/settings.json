@@ -3,6 +3,15 @@
   "hooks": {
     "PreToolUse": [
       {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python .claude/hooks/orchestrator-singleton.py"
+          }
+        ]
+      },
+      {
         "matcher": "Write|Edit|Create|Task|Spawn|Agent|str_replace",
         "hooks": [
           {
