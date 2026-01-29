@@ -171,6 +171,12 @@ def get_spec_tree(root_id: Optional[str] = None) -> list[dict]:
     return db.get_spec_tree(root_id)
 
 
+def cleanup_stale_runs() -> dict:
+    """Clean up stale/orphaned agent runs."""
+    db = get_db()
+    return db.cleanup_stale_runs()
+
+
 # =============================================================================
 # MCP SERVER
 # =============================================================================
@@ -284,6 +290,14 @@ def create_status_server():
                     }
                 }
             ),
+            Tool(
+                name="ralph_cleanup_stale",
+                description="Clean up stale/orphaned agent runs. Call this when no orchestrator is running to mark abandoned 'running' agent records as 'stale'.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {}
+                }
+            ),
         ]
 
     @server.call_tool()
@@ -357,6 +371,13 @@ def create_status_server():
             return [TextContent(
                 type="text",
                 text=json.dumps(tree, indent=2)
+            )]
+
+        elif name == "ralph_cleanup_stale":
+            result = cleanup_stale_runs()
+            return [TextContent(
+                type="text",
+                text=json.dumps(result, indent=2)
             )]
 
         else:

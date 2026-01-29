@@ -598,6 +598,53 @@ class RalphDB:
                 for row in rows
             ]
 
+    def cleanup_stale_runs(self) -> dict:
+        """
+        Mark all 'running' agent runs as 'stale'.
+
+        This should be called when no orchestrator is actively running,
+        to clean up orphaned agent run records from crashed/terminated sessions.
+
+        Returns a dict with cleanup results.
+        """
+        now = datetime.now(timezone.utc).isoformat()
+
+        with self._connection() as conn:
+            # Find stale runs first for reporting
+            stale_rows = conn.execute("""
+                SELECT id, spec_id, agent_type, started_at
+                FROM agent_runs
+                WHERE status = 'running'
+            """).fetchall()
+
+            if not stale_rows:
+                return {"cleaned": 0, "runs": []}
+
+            # Mark them as stale
+            conn.execute("""
+                UPDATE agent_runs
+                SET status = 'stale', completed_at = ?
+                WHERE status = 'running'
+            """, (now,))
+
+        # Log events for each cleaned run (outside connection context)
+        cleaned_runs = []
+        for row in stale_rows:
+            self.log_event(row["spec_id"], "agent_run_stale", {
+                "run_id": row["id"],
+                "agent_type": row["agent_type"],
+                "started_at": row["started_at"],
+                "marked_stale_at": now
+            })
+            cleaned_runs.append({
+                "run_id": row["id"],
+                "spec_id": row["spec_id"],
+                "agent_type": row["agent_type"],
+                "started_at": row["started_at"]
+            })
+
+        return {"cleaned": len(cleaned_runs), "runs": cleaned_runs}
+
     # =========================================================================
     # SUMMARY / STATUS
     # =========================================================================

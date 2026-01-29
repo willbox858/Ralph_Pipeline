@@ -178,6 +178,7 @@ class Phase(str, Enum):
     PENDING = "pending"
     RESEARCH = "research"
     ARCHITECTURE = "architecture"
+    SCAFFOLD = "scaffold"  # Generate stubs, await approval before implementation
     IMPLEMENTATION = "implementation"
     VERIFICATION = "verification"
     INTEGRATION = "integration"
@@ -1871,6 +1872,71 @@ async def run_architecture_loop(spec: Spec, mcp_server) -> tuple[bool, Optional[
     return True, proposal
 
 
+async def run_scaffold_phase(spec: Spec, mcp_server) -> str:
+    """Run scaffold phase - generate stubs and await approval.
+
+    Returns:
+        "skipped" - No classes to scaffold
+        "approved" - Stubs already approved, continue to implementation
+        "hibernating" - Awaiting stub approval
+        "failed" - Scaffold generation failed
+    """
+    state = get_state()
+
+    # Skip scaffold only if spec has no structure.classes defined
+    has_classes = spec.structure and spec.structure.classes and len(spec.structure.classes) > 0
+    if not has_classes:
+        log("No classes to scaffold, skipping", "SCAFFOLD", spec.name, spec.depth)
+        return "skipped"
+
+    # Check if stubs already approved
+    if getattr(spec, 'stubs_approved', False):
+        log("Stubs already approved", "SCAFFOLD", spec.name, spec.depth)
+        return "approved"
+
+    state.update_phase(spec.name, Phase.SCAFFOLD)
+    log("Running scaffold phase", "SCAFFOLD", spec.name, spec.depth)
+
+    try:
+        # Import here to avoid circular imports
+        import sys
+        lib_path = str(Path(__file__).parent.parent / "lib")
+        if lib_path not in sys.path:
+            sys.path.insert(0, lib_path)
+
+        from scaffold_phase import run_scaffold, await_stub_approval
+
+        # Generate stubs
+        result = await run_scaffold(str(spec.path))
+
+        if not result.success:
+            log(f"Scaffold failed: {result.error}", "ERROR", spec.name, spec.depth)
+            return "failed"
+
+        if result.generated_files:
+            log(f"Generated {len(result.generated_files)} stub files", "SCAFFOLD", spec.name, spec.depth)
+            for f in result.generated_files:
+                log(f"  - {f}", "SCAFFOLD", spec.name, spec.depth)
+
+        # Check approval status
+        approval = await_stub_approval(str(spec.path))
+
+        if hasattr(approval, 'reason'):  # HibernationRequest
+            log(f"Awaiting stub approval: {approval.reason}", "SCAFFOLD", spec.name, spec.depth)
+            state.flag_for_review(spec.name, "awaiting_stub_approval", {
+                "generated_files": list(result.generated_files),
+                "message": "Review generated stubs and run /approve-stubs to continue"
+            })
+            return "hibernating"
+
+        # Stubs approved
+        return "approved"
+
+    except Exception as e:
+        log(f"Scaffold phase error: {e}", "ERROR", spec.name, spec.depth)
+        return "failed"
+
+
 async def run_implementation_loop(spec: Spec, mcp_server) -> bool:
     """Run Implementer <-> Verifier loop with worktree isolation."""
     log("Starting implementation loop", "IMPL", spec.name, spec.depth)
@@ -2117,6 +2183,15 @@ async def process_leaf(spec_path: Path, mcp_server, depth: int) -> bool:
     if not await run_researcher(spec, mcp_server):
         state.update_phase(spec.name, Phase.FAILED)
         return False
+
+    # Scaffold phase (optional - generates stubs and awaits approval)
+    scaffold_result = await run_scaffold_phase(spec, mcp_server)
+    if scaffold_result == "hibernating":
+        return True  # Awaiting stub approval
+    elif scaffold_result == "failed":
+        state.update_phase(spec.name, Phase.FAILED)
+        return False
+    # scaffold_result == "skipped" or "approved" -> continue to implementation
 
     # Implementation loop (with worktree isolation)
     success = await run_implementation_loop(spec, mcp_server)
