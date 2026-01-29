@@ -6,7 +6,7 @@ Check the current status of a Ralph pipeline.
 
 This command accepts a spec path as an argument:
 ```
-/status Specs/Active/my-feature/spec.json
+/pipeline-status Specs/Active/my-feature/spec.json
 ```
 
 ## What This Shows
@@ -26,13 +26,13 @@ python .claude/scripts/check-pipeline-status.py --root "$SPEC_PATH"
 
 | Icon | Meaning |
 |------|---------|
-| ✓ | Complete |
-| ◆ | In progress |
-| ○ | Pending |
-| ✗ | Failed |
-| 🚫 | Blocked (needs review) |
-| 💤 | Hibernating |
-| 📨 | Has pending messages |
+| [x] | Complete |
+| [>] | In progress |
+| [ ] | Pending |
+| [X] | Failed |
+| [!] | Blocked (needs review) |
+| [z] | Hibernating |
+| [m] | Has pending messages |
 
 ## Example Output
 
@@ -43,18 +43,18 @@ Checked at: 2026-01-28 12:34:56
 ============================================================
 
 Total Specs:   4
-✓ Complete:    1
-◆ In Progress: 2
-○ Pending:     1
+[x] Complete:    1
+[>] In Progress: 2
+[ ] Pending:     1
 
-Progress: [████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░] 25%
+Progress: [############============================] 25%
 
 SPEC TREE:
 ----------------------------------------
-○ calculator [branch]
-  ✓ shared [leaf] (tests ✓)
-  ◆ parser [leaf] (iter 3)
-  ◆ evaluator [leaf] (iter 2, 💤 hibernating)
+[ ] calculator [branch]
+  [x] shared [leaf] (tests passed)
+  [>] parser [leaf] (iter 3)
+  [>] evaluator [leaf] (iter 2, [z] hibernating)
 ```
 
 ## Watch Mode

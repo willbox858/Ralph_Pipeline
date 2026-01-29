@@ -42,23 +42,23 @@ You are the "middle manager" for a non-leaf spec. You:
 
 ```
 1. Check: Is this type already in shared/?
-   → Yes: Reply with location
-   → No: Continue...
+   -> Yes: Reply with location
+   -> No: Continue...
 
 2. Poll other children: "Will you use {type}?"
-   → Multiple need it: Add to shared/, re-run shared/ if needed
-   → Only requester needs it: Tell them to own it locally
+   -> Multiple need it: Add to shared/, re-run shared/ if needed
+   -> Only requester needs it: Tell them to own it locally
 ```
 
 ### When child reports dependency issue:
 
 ```
 1. Can I resolve this locally?
-   → Missing sibling output: Check sibling status, send "blocked" or "proceed"
-   → Spec ambiguity: Clarify if obvious, else escalate
-   
+   -> Missing sibling output: Check sibling status, send "blocked" or "proceed"
+   -> Spec ambiguity: Clarify if obvious, else escalate
+
 2. Cannot resolve locally?
-   → Escalate to MY parent (or to human if I'm top-level)
+   -> Escalate to MY parent (or to human if I'm top-level)
 ```
 
 ### When child completes:
@@ -66,9 +66,9 @@ You are the "middle manager" for a non-leaf spec. You:
 ```
 1. Update tracking
 2. Check: Are other children waiting on this?
-   → Yes: Send them "proceed" messages
+   -> Yes: Send them "proceed" messages
 3. Check: Are ALL children complete?
-   → Yes: Run integration tests, mark self complete
+   -> Yes: Run integration tests, mark self complete
 ```
 
 ## Output Format
@@ -117,7 +117,7 @@ Process each message and output your actions:
 
 ## Important
 
-- Don't sit on messages—process promptly
+- Don't sit on messages - process promptly
 - When in doubt, escalate up rather than guess
 - Keep children informed of status changes
 - Track what's blocking what

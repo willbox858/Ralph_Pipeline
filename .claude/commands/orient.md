@@ -6,23 +6,30 @@ You are working in a Ralph project - a hierarchical spec-driven multi-agent deve
 
 Ralph uses **specs** (JSON files) to define what should be built, then runs **agents** to implement them:
 
-1. **Specs** describe features hierarchically (parent → children)
+1. **Specs** describe features hierarchically (parent -> children)
 2. **Agents** (Researcher, Proposer, Critic, Implementer, Verifier) do the work
 3. **Orchestrator** manages parallel execution and agent communication
+4. **Database** tracks specs, events, and messages (`.ralph/ralph.db`)
 
 ## Key Directories
 
 ```
 .claude/
 ├── scripts/
-│   ├── orchestrator.py          # Main pipeline runner
-│   └── check-pipeline-status.py # Status checker
-├── agents/                       # Agent prompts
-├── schema/                       # JSON schemas
-└── commands/                     # Slash commands (you are here)
+│   ├── orchestrator.py       # Main pipeline runner
+│   └── status-mcp-server.py  # MCP server for ralph_* tools
+├── agents/
+│   ├── *.md                  # Agent prompts
+│   └── configs/*.json        # Agent permissions/settings
+├── lib/                      # Shared Python modules
+├── schema/                   # JSON schemas
+└── commands/                 # Slash commands (you are here)
+
+.ralph/
+└── ralph.db                  # SQLite database
 
 Specs/
-└── Active/                       # Active specs go here
+└── Active/                   # Active specs go here
 ```
 
 ## Your Role
@@ -30,27 +37,49 @@ Specs/
 As the user-facing Claude, you:
 1. Help users **create specs** for features they want to build
 2. **Start the pipeline** with `/ralph`
-3. **Check status** with `/status`
+3. **Check status** with `/pipeline-status` or MCP tools
 4. **Intervene** when specs are flagged for review
+
+## Slash Commands
+
+| Command | Purpose |
+|---------|---------|
+| `/orient` | You are here |
+| `/spec <name>` | Create a new feature spec |
+| `/ralph <path>` | Start the pipeline |
+| `/pipeline-status` | Check pipeline progress |
+| `/review <path>` | Handle blocked/failed specs |
+| `/upgrade` | Upgrade older Ralph repos to v4 |
+
+## MCP Tools (if loaded)
+
+These tools query the database directly:
+
+| Tool | Purpose |
+|------|---------|
+| `ralph_pipeline_summary` | Overview of all specs |
+| `ralph_list_specs` | List specs with optional status filter |
+| `ralph_get_spec` | Get details for one spec |
+| `ralph_spec_tree` | Hierarchical view |
+| `ralph_review_queue` | Specs needing attention |
 
 ## Common Tasks
 
 ### Create a new spec
-```bash
-# Copy the template
-cp .claude/templates/spec-template.json Specs/Active/my-feature/spec.json
-# Then edit it with the user
+```
+/spec my-feature
 ```
 
 ### Start the pipeline
-```bash
-python .claude/scripts/orchestrator.py --spec Specs/Active/my-feature/spec.json --live
+```
+/ralph Specs/Active/my-feature/spec.json
 ```
 
 ### Check status
-```bash
-python .claude/scripts/check-pipeline-status.py --root Specs/Active/my-feature/spec.json
 ```
+/pipeline-status Specs/Active/my-feature/spec.json
+```
+Or use `ralph_pipeline_summary` MCP tool.
 
 ## Key Concepts
 
@@ -58,13 +87,14 @@ python .claude/scripts/check-pipeline-status.py --root Specs/Active/my-feature/s
 - **Non-leaf spec**: Decomposes into children
 - **Shared types**: Cross-cutting types used by siblings
 - **Hibernation**: Agents sleep and wake as needed
-- **Integration tests**: Run when all siblings complete
+- **Hooks**: Permission enforcement per agent role
 
 ## Read More
 
 - `CLAUDE.md` - Project context
-- `MIGRATION-SUMMARY.md` - Full architecture docs
+- `STYLE.md` - Code style conventions
 - `.claude/agents/*.md` - Agent prompts
+- `.claude/agents/configs/*.json` - Agent permissions
 
 ---
 

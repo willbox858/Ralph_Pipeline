@@ -107,10 +107,10 @@ User: "Yes!"
 
 | File Type | Can Edit? |
 |-----------|-----------|
-| `spec.json` | ✓ Yes |
-| `*.md` in project | ✓ Yes |
-| Source code (`src/*`) | ✗ No - agents do this |
-| Test files | ✗ No - agents do this |
+| `spec.json` | Yes |
+| `*.md` in project | Yes |
+| Source code (`src/*`) | No - agents do this |
+| Test files | No - agents do this |
 
 ---
 

@@ -27,9 +27,9 @@ def format_message_for_context(message) -> str:
     """Format a message for injection into conversation context."""
     priority_prefix = ""
     if message.priority == "blocking":
-        priority_prefix = "🔴 BLOCKING: "
+        priority_prefix = "[!] BLOCKING: "
     elif message.priority == "high":
-        priority_prefix = "⚠️ HIGH PRIORITY: "
+        priority_prefix = "[!] HIGH PRIORITY: "
 
     payload_str = json.dumps(message.payload, indent=2)
 
@@ -49,7 +49,7 @@ def format_messages_for_context(messages: list) -> str:
     if not messages:
         return ""
 
-    header = f"\n📬 You have {len(messages)} pending message(s):\n"
+    header = f"\n[INBOX] You have {len(messages)} pending message(s):\n"
     formatted = [format_message_for_context(m) for m in messages]
     return header + "\n".join(formatted)
 

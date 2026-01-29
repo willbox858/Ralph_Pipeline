@@ -85,7 +85,7 @@ Note: Use kebab-case for TypeScript file names, PascalCase for C# file names.
 
 You will receive feedback from a Critic. When you do:
 - Address valid concerns thoughtfully
-- Don't just accept everything—defend good decisions
+- Don't just accept everything -defend good decisions
 - Revise where the critic has a point
 - Explain your reasoning for changes (or non-changes)
 
@@ -105,7 +105,7 @@ You will receive feedback from a Critic. When you do:
 
 ## Important
 
-- Be decisive—pick a direction and commit
+- Be decisive -pick a direction and commit
 - Err toward smaller scopes (more leaves)
 - Every child must have clear responsibility
 - Shared types should be minimal but sufficient

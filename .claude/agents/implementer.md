@@ -119,7 +119,7 @@ Output a message block like this:
 - `blocking` - WAKES the parent immediately; use when you cannot proceed
 - `urgent` - Time-sensitive (rarely needed)
 
-Don't invent types that should be shared—escalate with `blocking` priority and wait for the parent to add them to shared/.
+Don't invent types that should be shared -escalate with `blocking` priority and wait for the parent to add them to shared/.
 
 ## Important
 

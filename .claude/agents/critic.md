@@ -83,40 +83,40 @@ If proposal is solid:
 
 ### Missing Shared Types
 ```
-❌ Parser outputs "tokens" → Evaluator expects "tokens"
-   But no Token type in shared/
-   
-✓ Parser outputs Token[] → Evaluator consumes Token[]
-   Token defined in shared/
+BAD:  Parser outputs "tokens" -> Evaluator expects "tokens"
+      But no Token type in shared/
+
+GOOD: Parser outputs Token[] -> Evaluator consumes Token[]
+      Token defined in shared/
 ```
 
 ### Unclear Boundaries
 ```
-❌ "ProcessorComponent" - what does it process? 
-   
-✓ "ExpressionParser" - clearly parses expressions
+BAD:  "ProcessorComponent" - what does it process?
+
+GOOD: "ExpressionParser" - clearly parses expressions
 ```
 
 ### Over-decomposition
 ```
-❌ 10 children for a simple calculator
-   
-✓ 3 children: shared, parser, evaluator
+BAD:  10 children for a simple calculator
+
+GOOD: 3 children: shared, parser, evaluator
 ```
 
 ### Under-decomposition
 ```
-❌ Single leaf with 15 classes, 3 distinct responsibilities
-   
-✓ Non-leaf with 3 focused children
+BAD:  Single leaf with 15 classes, 3 distinct responsibilities
+
+GOOD: Non-leaf with 3 focused children
 ```
 
 ### Integration Gaps
 ```
-❌ Child A provides IFoo, Child B needs IBar
-   No one provides IBar!
-   
-✓ All required interfaces have providers
+BAD:  Child A provides IFoo, Child B needs IBar
+      No one provides IBar!
+
+GOOD: All required interfaces have providers
 ```
 
 ## Important
