@@ -105,6 +105,30 @@ public class BasicAttack : IAttack
 
 ---
 
+## Console Output
+
+**ASCII Only:**
+- Use only base ASCII characters in console output (codes 0-127)
+- Avoid Unicode symbols like `✓`, `✗`, `→`, `•`, etc.
+- Windows terminals often have encoding issues with non-ASCII
+- Use ASCII alternatives: `[OK]`, `[X]`, `->`, `-`, `*`
+
+**Good:**
+```python
+print("[OK] Task completed")
+print("[  ] Task pending")
+print("  -> Next step")
+```
+
+**Bad:**
+```python
+print("✓ Task completed")   # Windows encoding error
+print("○ Task pending")      # Won't display correctly
+print("  → Next step")       # Breaks on cp1252
+```
+
+---
+
 ## Anti-Patterns to Avoid
 
 - God classes (>500 lines, does everything)
@@ -113,6 +137,7 @@ public class BasicAttack : IAttack
 - Deep inheritance hierarchies (max 2 levels)
 - Public fields (use properties)
 - Magic numbers (use named constants)
+- Unicode symbols in console output (encoding issues)
 
 ---
 
