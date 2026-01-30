@@ -135,12 +135,47 @@ Specs/
 - Avoid deep nesting (max 3 levels)
 "@ | Out-File -FilePath "STYLE.md" -Encoding UTF8
 
+# Create .mcp.json for MCP server discovery
+Write-Host "[5/8] Creating .mcp.json..." -ForegroundColor Green
+@"
+{
+  "mcpServers": {
+    "ralph-status": {
+      "type": "stdio",
+      "command": "python",
+      "args": [".claude/scripts/status-mcp-server.py"],
+      "env": {}
+    }
+  }
+}
+"@ | Out-File -FilePath ".mcp.json" -Encoding UTF8
+
+# Create .ralph directory and initialize database
+Write-Host "[6/8] Initializing Ralph database..." -ForegroundColor Green
+New-Item -ItemType Directory -Force -Path ".ralph" | Out-Null
+try {
+    python -c "import sys; sys.path.insert(0, '.claude/lib'); from ralph_db import RalphDB; RalphDB('.ralph/ralph.db')"
+} catch {
+    Write-Host "  Warning: Could not initialize database. Run 'python setup.py' after installing dependencies." -ForegroundColor Yellow
+}
+
+# Install Python dependencies
+Write-Host "[7/8] Checking Python dependencies..." -ForegroundColor Green
+if (Test-Path ".ralph-pipeline\setup.py") {
+    try {
+        python .ralph-pipeline\setup.py --check
+    } catch {
+        Write-Host "  Run 'python .ralph-pipeline\setup.py' to install dependencies." -ForegroundColor Yellow
+    }
+}
+
 # Update .gitignore
-Write-Host "[5/5] Updating .gitignore..." -ForegroundColor Green
+Write-Host "[8/8] Updating .gitignore..." -ForegroundColor Green
 $gitignoreContent = @"
 # Ralph Pipeline
 .orchestrator-lock
 .agent-active
+.ralph/
 
 # Generated
 src/
@@ -162,7 +197,7 @@ Thumbs.db
 if (Test-Path ".gitignore") {
     $existing = Get-Content ".gitignore" -Raw
     if ($existing -notmatch "\.orchestrator-lock") {
-        Add-Content ".gitignore" "`n# Ralph Pipeline`n.orchestrator-lock`n.agent-active"
+        Add-Content ".gitignore" "`n# Ralph Pipeline`n.orchestrator-lock`n.agent-active`n.ralph/"
     }
 } else {
     $gitignoreContent | Out-File -FilePath ".gitignore" -Encoding UTF8

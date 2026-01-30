@@ -157,16 +157,46 @@ Specs/
 
 STYLEMD
 
+# Create .mcp.json for MCP server discovery
+echo -e "${GREEN}[5/8]${NC} Creating .mcp.json..."
+cat > .mcp.json << 'MCPJSON'
+{
+  "mcpServers": {
+    "ralph-status": {
+      "type": "stdio",
+      "command": "python",
+      "args": [".claude/scripts/status-mcp-server.py"],
+      "env": {}
+    }
+  }
+}
+MCPJSON
+
+# Create .ralph directory and initialize database
+echo -e "${GREEN}[6/8]${NC} Initializing Ralph database..."
+mkdir -p .ralph
+python3 -c "import sys; sys.path.insert(0, '.claude/lib'); from ralph_db import RalphDB; RalphDB('.ralph/ralph.db')" 2>/dev/null || \
+python -c "import sys; sys.path.insert(0, '.claude/lib'); from ralph_db import RalphDB; RalphDB('.ralph/ralph.db')"
+
+# Install Python dependencies
+echo -e "${GREEN}[7/8]${NC} Checking Python dependencies..."
+if [ -f ".ralph-pipeline/setup.py" ]; then
+    python3 .ralph-pipeline/setup.py --check 2>/dev/null || python .ralph-pipeline/setup.py --check || true
+fi
+
 # Create .gitignore entries if needed
-echo -e "${GREEN}[5/5]${NC} Updating .gitignore..."
+echo -e "${GREEN}[8/8]${NC} Updating .gitignore..."
 if [ -f ".gitignore" ]; then
     # Append if not already present
-    grep -q ".orchestrator-lock" .gitignore || echo -e "\n# Ralph Pipeline\n.orchestrator-lock\n.agent-active" >> .gitignore
+    grep -q ".orchestrator-lock" .gitignore || echo -e "\n# Ralph Pipeline\n.orchestrator-lock\n.agent-active\n.ralph/" >> .gitignore
 else
     cat > .gitignore << 'GITIGNORE'
 # Ralph Pipeline
 .orchestrator-lock
 .agent-active
+
+# Ralph data
+.ralph/
 
 # Generated
 src/
