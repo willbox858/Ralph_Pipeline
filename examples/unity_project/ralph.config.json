@@ -1,0 +1,25 @@
+{
+  "name": "MyUnityGame",
+  "tech_stack": {
+    "language": "C#",
+    "runtime": "Unity 2022.3",
+    "frameworks": ["Unity"],
+    "test_framework": "Unity Test Framework",
+    "build_command": "",
+    "test_command": "",
+    "mcp_tools": ["unity"]
+  },
+  "mcp_servers": [
+    {
+      "name": "unity",
+      "command": "npx",
+      "args": ["-y", "@anthropic/mcp-unity"],
+      "env": {
+        "UNITY_PROJECT_PATH": "."
+      }
+    }
+  ],
+  "specs_dir": "Specs/Active",
+  "source_dir": "Assets/Scripts",
+  "max_iterations": 15
+}

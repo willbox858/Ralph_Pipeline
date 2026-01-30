@@ -1,45 +1,13 @@
 {
-  "enableAllProjectMcpServers": true,
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python .claude/hooks/orchestrator-singleton.py"
-          }
-        ]
-      },
-      {
-        "matcher": "Write|Edit|Create|Task|Spawn|Agent|str_replace",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python .claude/hooks/orchestrator-guard.py"
-          }
-        ]
-      },
-      {
-        "matcher": "Write|Edit|Create|str_replace",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python .claude/hooks/scope-guard.py"
-          }
-        ]
-      }
+  "permissions": {
+    "allow": [
+      "Read(**)",
+      "Glob(**)",
+      "Grep(**)"
     ],
-    "SubagentStop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python .claude/hooks/verify-implementation.py",
-            "timeout": 30
-          }
-        ]
-      }
-    ]
+    "deny": []
+  },
+  "env": {
+    "RALPH_ENABLED": "true"
   }
 }

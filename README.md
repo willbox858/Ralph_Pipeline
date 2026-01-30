@@ -1,143 +1,240 @@
-# Ralph Pipeline
+# Ralph Pipeline v2
 
-A hierarchical, spec-driven development pipeline using Claude agents. Define features as JSON specs, let agents handle implementation.
+A programmatic pipeline for orchestrating LLM agents in software development.
 
-## Quick Setup
+## Philosophy
 
-### Bash (Linux/macOS/Git Bash)
+**Programmatic layer handles deterministic logic:**
+- State machine (phases, transitions)
+- Scope enforcement (agents can only touch allowed paths)
+- Message routing (validated, logged)
+- Tool provisioning (per role + tech stack)
+
+**Agent layer handles soft logic:**
+- Understanding requirements
+- Designing architecture
+- Writing code
+- Reviewing and critiquing
+- Diagnosing failures
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                      USER                                       │
+│                        │                                        │
+│            (conversation, /commands)                            │
+│                        ▼                                        │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │                INTERFACE AGENT                           │   │
+│  │         (User-facing Claude Code instance)               │   │
+│  │  • Helps draft specs                                     │   │
+│  │  • Receives approval requests via MCP                    │   │
+│  │  • Queries status via /StatusCheck                       │   │
+│  └─────────────────────────────────────────────────────────┘   │
+│                        │                                        │
+│                        ▼                                        │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │                   ORCHESTRATOR                           │   │
+│  │            (Programmatic Python engine)                  │   │
+│  │  • State machine • Message bus • Agent deployment        │   │
+│  └─────────────────────────────────────────────────────────┘   │
+│                        │                                        │
+│         ┌──────────────┼──────────────┐                        │
+│         ▼              ▼              ▼                        │
+│  ┌────────────┐ ┌────────────┐ ┌────────────┐                  │
+│  │ARCHITECTURE│ │IMPLEMENTAT'N│ │MAINTENANCE │                  │
+│  │   TEAM     │ │   TEAM     │ │   TEAM     │                  │
+│  │Proposer    │ │Implementer │ │Analyzer    │                  │
+│  │Critic      │ │Verifier    │ │Troubleshoot│                  │
+│  │Spec-Writer │ │            │ │Editor      │                  │
+│  └────────────┘ └────────────┘ └────────────┘                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## Quick Start
+
 ```bash
-curl -sSL https://raw.githubusercontent.com/willbox858/Ralph_Pipeline/master/setup.sh | bash
+# Initialize a project
+ralph init --language Python
+
+# Create a spec
+mkdir -p Specs/Active/my-feature
+cat > Specs/Active/my-feature/spec.json << 'EOF'
+{
+  "name": "my-feature",
+  "problem": "Need a calculator that can parse and evaluate expressions",
+  "success_criteria": "Can evaluate '2 + 3 * 4' correctly"
+}
+EOF
+
+# Start the pipeline
+ralph start my-feature
+
+# Check status
+ralph status
 ```
 
-### PowerShell (Windows)
-```powershell
-irm https://raw.githubusercontent.com/willbox858/Ralph_Pipeline/master/setup.ps1 | iex
+## User Flow
+
+1. **User proposes feature** → Interface Agent helps draft spec
+2. **Spec submitted** → Orchestrator creates directory, starts architecture phase
+3. **Architecture Team works** → Proposer designs, Critic reviews
+4. **User approval gate** → User reviews architecture, approves/rejects
+5. **If non-leaf** → Children created, recurse
+6. **If leaf** → Implementation Team works → Implementer codes, Verifier tests
+7. **User approval gate** → User reviews code, approves/rejects
+8. **Complete** → Notify parent, integrate when all siblings done
+
+## Tech Stack Configuration
+
+Ralph supports multiple languages via tool presets:
+
+```json
+{
+  "tech_stack": {
+    "language": "C#",
+    "runtime": "Unity 2022.3",
+    "mcp_tools": ["unity"]
+  }
+}
 ```
 
-### Manual Setup
-```bash
-# Add as submodule
-git submodule add https://github.com/willbox858/Ralph_Pipeline.git .ralph-pipeline
+Built-in presets: `python`, `csharp`, `typescript`, `unity`, `godot`, `rust`, `go`
 
-# Create junction/symlink to .claude
-# Windows:
-cmd /c "mklink /J .claude .ralph-pipeline\.claude"
-# Unix:
-ln -s .ralph-pipeline/.claude .claude
+Each preset configures:
+- Available tools (Read, Write, Bash, etc.)
+- MCP servers (Unity, Godot, etc.)
+- Build/test commands
+- File patterns
 
-# Create specs directory
-mkdir -p Specs/Active
+## Hooks
 
-# Copy and customize CLAUDE.md and STYLE.md from .ralph-pipeline/
-```
-
-## Features
-
-- **Spec-Driven Development**: Define features as JSON specs with clear interfaces and criteria
-- **Multi-Agent Architecture**: Specialized agents for research, architecture, implementation, and verification
-- **Adversarial Loops**: Proposer <-> Critic and Implementer <-> Verifier ensure quality
-- **Hierarchical Messaging**: Clean parent-child communication prevents chaos
-- **Multi-Language Support**: Tech stack override system for TypeScript, C#, Python, Go, Java, Rust
-- **Windows Compatible**: ASCII output, UTF-8 file handling
-
-## Usage
-
-Start Claude Code in your project and run:
-
-```
-/orient          # Understand the system and current state
-/spec my-feature # Create a new feature spec
-/ralph <path>    # Start the pipeline on a spec
-/status <path>   # Check pipeline progress
-/review <path>   # Handle blocked specs
-```
-
-## How It Works
-
-```
-1. Define Spec (you + Claude)
-   |
-2. Research Phase (researcher agent)
-   |
-3. Architecture Phase (proposer <-> critic loop)
-   |
-4. If non-leaf: Decompose into children, recurse
-   If leaf: Implementation Phase (implementer <-> verifier loop)
-   |
-5. Integration Tests (when all children complete)
-   |
-6. Done!
-```
+Ralph uses Claude Code hooks for:
+- **Scope enforcement**: Agents can only write to allowed paths
+- **Message injection**: Pending messages delivered via PreToolUse
+- **Artifact tracking**: Files created/modified are logged
+- **Audit logging**: All tool uses are recorded
 
 ## Directory Structure
 
 ```
-your-project/
-├── CLAUDE.md              # Project instructions (customize this)
-├── STYLE.md               # Coding conventions (customize this)
-├── .claude/               # Pipeline code (symlink to submodule)
-├── .ralph-pipeline/       # Pipeline submodule
+my-project/
+├── ralph.config.json         # Project configuration
 ├── Specs/
 │   └── Active/
 │       └── my-feature/
-│           ├── spec.json
-│           ├── research.json
-│           └── children/
-│               ├── shared/
-│               └── component-a/
-└── src/                   # Generated source code
+│           ├── spec.json     # Feature spec
+│           └── children/     # Child specs (if non-leaf)
+├── src/                      # Generated code
+└── .ralph/
+    ├── state/                # Pipeline state
+    └── prompts/              # Custom agent prompts
 ```
 
-## Tech Stack Override
-
-Specify language per-spec in `constraints.tech_stack`:
+## Spec Schema
 
 ```json
 {
+  "name": "feature-name",
+  "problem": "What problem does this solve?",
+  "success_criteria": "How do we know it works?",
+  "is_leaf": true,
+  "classes": [
+    {
+      "name": "Calculator",
+      "kind": "class",
+      "responsibility": "Evaluates expressions",
+      "location": "src/calculator.py"
+    }
+  ],
+  "acceptance_criteria": [
+    {
+      "id": "AC-1",
+      "behavior": "Evaluates 2+2 to 4"
+    }
+  ],
   "constraints": {
     "tech_stack": {
-      "language": "TypeScript",
-      "runtime": "Node.js 20+",
-      "frameworks": ["Fastify", "Jest"],
-      "rationale": "Async I/O requirements"
+      "language": "Python"
     }
   }
 }
 ```
 
-Supported languages: TypeScript, C#, Python, Go, Java, Rust
-
-## Agent Roles
-
-| Agent | Purpose |
-|-------|---------|
-| Researcher | Finds libraries, patterns, best practices |
-| Proposer | Designs system architecture |
-| Critic | Reviews and challenges architecture |
-| Implementer | Writes code to satisfy spec |
-| Verifier | Runs tests, reports failures |
-| Coordinator | Routes messages between parent/child |
-
-## Updating the Pipeline
+## Installation
 
 ```bash
-cd .ralph-pipeline
-git pull origin master
-cd ..
-git add .ralph-pipeline
-git commit -m "Update Ralph Pipeline"
+pip install ralph-pipeline
+```
+
+Or from source:
+
+```bash
+git clone <repo>
+cd ralph_v2
+pip install -e .
 ```
 
 ## Requirements
 
-- Python 3.10+
-- Git
-- Claude Code CLI
+- Python 3.11+
+- Claude Code CLI (bundled with claude-agent-sdk)
+- API key from [Anthropic Console](https://console.anthropic.com/)
 
-For live mode (API calls):
-- `pip install anthropic`
-- `ANTHROPIC_API_KEY` environment variable
+## Installation
 
-## License
+```bash
+pip install ralph-pipeline
+```
 
-MIT
+Or from source:
+
+```bash
+git clone <repo>
+cd ralph_v2
+pip install -e .
+```
+
+## Agent SDK Integration
+
+Ralph uses the [Claude Agent SDK](https://platform.claude.com/docs/en/agent-sdk/overview) to invoke agents. The SDK provides:
+
+- **Built-in tools**: Read, Write, Edit, Bash, Glob, Grep, WebSearch, etc.
+- **MCP servers**: Connect to Unity, Godot, databases, APIs
+- **Permission modes**: Control what agents can do autonomously
+- **Session management**: Context, compaction, retries
+
+Example agent invocation:
+
+```python
+from ralph import AgentRole, Spec, init_orchestrator
+
+# Initialize
+orchestrator = init_orchestrator(Path("."))
+
+# Submit a spec
+spec_data = {
+    "name": "my-feature",
+    "problem": "Need a REST API client",
+    "success_criteria": "Can GET/POST to endpoints"
+}
+spec_id = await orchestrator.submit_spec(spec_data)
+```
+
+Under the hood, Ralph calls `claude_agent_sdk.query()`:
+
+```python
+from claude_agent_sdk import query, ClaudeAgentOptions
+
+async for message in query(
+    prompt="Implement the REST client per the spec...",
+    options=ClaudeAgentOptions(
+        allowed_tools=["Read", "Write", "Edit", "Bash"],
+        system_prompt="You are an expert Python developer...",
+        permission_mode="acceptEdits",
+        mcp_servers={"unity": {...}}  # If Unity project
+    )
+):
+    # Handle streaming messages...
+```

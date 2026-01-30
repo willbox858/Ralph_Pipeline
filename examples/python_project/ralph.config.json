@@ -1,0 +1,16 @@
+{
+  "name": "MyPythonProject",
+  "tech_stack": {
+    "language": "Python",
+    "runtime": "Python 3.11+",
+    "frameworks": [],
+    "test_framework": "pytest",
+    "build_command": "python -m py_compile",
+    "test_command": "pytest -v",
+    "lint_command": "ruff check .",
+    "mcp_tools": []
+  },
+  "specs_dir": "Specs/Active",
+  "source_dir": "src",
+  "max_iterations": 15
+}
