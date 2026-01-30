@@ -1,0 +1,135 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Ralph Verifier Configuration",
+  "description": "Project-level configuration for how Ralph agents run tests",
+  "type": "object",
+  "required": ["project_type", "test_method"],
+  "properties": {
+    "project_type": {
+      "type": "string",
+      "enum": ["python", "unity", "unreal", "cpp", "typescript", "javascript", "csharp", "go", "rust", "java", "custom"],
+      "description": "Primary language/platform of the project"
+    },
+    "test_method": {
+      "type": "string",
+      "enum": ["cli", "unity_mcp", "manual", "custom"],
+      "description": "How tests are executed: cli (command line), unity_mcp (Unity MCP tools), manual (human runs), custom"
+    },
+    "test_command": {
+      "type": "string",
+      "description": "Command to run tests (for cli method). Overrides project_type defaults."
+    },
+    "build_command": {
+      "type": "string",
+      "description": "Command to build/compile before testing (optional)"
+    },
+    "test_paths": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "Directories containing tests"
+    },
+    "unity": {
+      "type": "object",
+      "description": "Unity-specific configuration",
+      "properties": {
+        "test_modes": {
+          "type": "array",
+          "items": {"type": "string", "enum": ["EditMode", "PlayMode"]},
+          "description": "Which Unity test modes to run"
+        },
+        "assembly_names": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "Specific test assembly names to run (empty = all)"
+        },
+        "timeout_seconds": {
+          "type": "integer",
+          "description": "Test timeout in seconds",
+          "default": 300
+        }
+      }
+    },
+    "unreal": {
+      "type": "object",
+      "description": "Unreal-specific configuration",
+      "properties": {
+        "test_filter": {
+          "type": "string",
+          "description": "Automation test filter pattern (e.g., 'Project.')"
+        },
+        "modules": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "Module names containing tests"
+        },
+        "editor_path": {
+          "type": "string",
+          "description": "Path to UnrealEditor executable (if not in PATH)"
+        }
+      }
+    },
+    "python": {
+      "type": "object",
+      "description": "Python-specific configuration",
+      "properties": {
+        "framework": {
+          "type": "string",
+          "enum": ["pytest", "unittest"],
+          "default": "pytest"
+        },
+        "coverage": {
+          "type": "boolean",
+          "description": "Run with coverage reporting",
+          "default": false
+        },
+        "markers": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "Pytest markers to include"
+        }
+      }
+    },
+    "cpp": {
+      "type": "object",
+      "description": "C++-specific configuration",
+      "properties": {
+        "framework": {
+          "type": "string",
+          "enum": ["googletest", "catch2", "doctest", "ctest"],
+          "default": "ctest"
+        },
+        "build_dir": {
+          "type": "string",
+          "description": "Build directory path",
+          "default": "build"
+        }
+      }
+    },
+    "file_verification": {
+      "type": "object",
+      "description": "Settings for verifying implementation files exist",
+      "properties": {
+        "required_extensions": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "File extensions that must exist for each class (e.g., [\".cs\", \".meta\"] for Unity)"
+        },
+        "check_meta_files": {
+          "type": "boolean",
+          "description": "Unity: verify .meta files exist alongside assets",
+          "default": false
+        }
+      }
+    },
+    "mcp_servers": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "MCP servers required for testing (e.g., [\"unityMCP\"])"
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": {"type": "string"},
+      "description": "Environment variables to set when running tests"
+    }
+  }
+}

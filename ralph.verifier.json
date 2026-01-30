@@ -1,0 +1,13 @@
+{
+  "project_type": "python",
+  "test_method": "cli",
+  "test_command": "pytest",
+  "test_paths": ["tests/"],
+  "python": {
+    "framework": "pytest",
+    "coverage": false
+  },
+  "file_verification": {
+    "required_extensions": [".py"]
+  }
+}
