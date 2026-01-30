@@ -1925,8 +1925,8 @@ async def run_scaffold_phase(spec: Spec, mcp_server) -> str:
     """
     state = get_state()
 
-    # Skip scaffold only if spec has no structure.classes defined
-    has_classes = spec.structure and spec.structure.classes and len(spec.structure.classes) > 0
+    # Skip scaffold only if spec has no classes defined
+    has_classes = spec.classes and len(spec.classes) > 0
     if not has_classes:
         log("No classes to scaffold, skipping", "SCAFFOLD", spec.name, spec.depth)
         return "skipped"
