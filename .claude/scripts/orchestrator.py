@@ -1732,7 +1732,7 @@ async def spawn_agent(
         mcp_servers={"orchestrator": mcp_server},
         permission_mode="bypassPermissions",
         cwd=str(cwd),
-        setting_sources=["project"],
+        setting_sources=["project", "user"],  # Include user MCP servers (e.g., unityMCP)
         model=CONFIG.model,
     )
 

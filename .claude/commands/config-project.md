@@ -7,6 +7,14 @@ Set up Ralph configuration for this project.
 1. **`ralph.verifier.json`** - Tells agents how to run tests
 2. **`STYLE.md`** (optional) - Code style guide for agents
 
+## MCP Server Access
+
+Agents inherit MCP servers from two sources:
+- **Project-level**: `.mcp.json` in project root
+- **User-level**: Your global Claude MCP configuration
+
+For Unity projects, if you have `unityMCP` configured globally, agents will automatically have access to it. No project-level config needed.
+
 ## Step 1: Detect Current Setup
 
 First, look for existing configuration:
