@@ -201,11 +201,30 @@ Copy-Item -Path $ralphClaudeMd -Destination $claudeMd -Force
 Write-Host "  ✓ CLAUDE.md copied from submodule" -ForegroundColor Green
 
 # ============================================================================
-# STEP 4: Create initial config (if doesn't exist)
+# STEP 4: Create MCP config and ralph.config.json
 # ============================================================================
 
 Write-Host "[4/5] Setting up configuration..." -ForegroundColor Cyan
 
+# Create .mcp.json for MCP server config
+$mcpConfigFile = Join-Path $ProjectPath ".mcp.json"
+
+# Get the relative path to Ralph submodule
+$ralphRelative = [System.IO.Path]::GetRelativePath($ProjectPath, $RalphPath).Replace("\", "/")
+
+$mcpConfig = @{
+    mcpServers = @{
+        ralph = @{
+            command = "cmd"
+            args = @("/c", "cd", $ralphRelative, "&&", "python", "-m", "ralph.mcp_server.server")
+        }
+    }
+}
+
+$mcpConfig | ConvertTo-Json -Depth 10 | Set-Content -Path $mcpConfigFile -Encoding UTF8
+Write-Host "  Created: .mcp.json (MCP server config)" -ForegroundColor Gray
+
+# Create ralph.config.json
 $configFile = Join-Path $ProjectPath "ralph.config.json"
 
 if (-not (Test-Path $configFile)) {
@@ -246,6 +265,7 @@ $checks = @(
     @{ Path = ".claude"; Type = "Directory" },
     @{ Path = ".claude/settings.json"; Type = "File" },
     @{ Path = ".claude/commands"; Type = "Directory" },
+    @{ Path = ".mcp.json"; Type = "File" },
     @{ Path = "CLAUDE.md"; Type = "File" },
     @{ Path = "Specs/Active"; Type = "Directory" },
     @{ Path = ".ralph/state"; Type = "Directory" },
