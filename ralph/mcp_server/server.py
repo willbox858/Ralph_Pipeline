@@ -146,7 +146,7 @@ async def process_spec_async(spec_id: str, spec_data: Dict[str, Any]) -> None:
             # Update state
             spec.iteration = iteration
             spec_data["iteration"] = iteration
-            spec_data["phase"] = "ARCHITECTURE"
+            spec_data["phase"] = "architecture"
             save_spec(spec_id, spec_data)
             
             tech_stack = spec.get_effective_tech_stack()
@@ -162,7 +162,7 @@ async def process_spec_async(spec_id: str, spec_data: Dict[str, Any]) -> None:
             
             if not proposer_result.success:
                 logger.error(f"[{spec_id}] Proposer failed: {proposer_result.error}")
-                spec_data["phase"] = "BLOCKED"
+                spec_data["phase"] = "blocked"
                 spec_data["error"] = proposer_result.error
                 save_spec(spec_id, spec_data)
                 return
@@ -189,7 +189,7 @@ async def process_spec_async(spec_id: str, spec_data: Dict[str, Any]) -> None:
             if "approved" in output_lower or "lgtm" in output_lower:
                 if "reject" not in output_lower:
                     logger.info(f"[{spec_id}] Architecture approved by Critic!")
-                    spec_data["phase"] = "AWAITING_ARCH_APPROVAL"
+                    spec_data["phase"] = "awaiting_arch_approval"
                     spec_data["critic_feedback"] = critic_result.output
                     save_spec(spec_id, spec_data)
                     return
@@ -201,20 +201,20 @@ async def process_spec_async(spec_id: str, spec_data: Dict[str, Any]) -> None:
         
         # Exceeded max iterations
         logger.warning(f"[{spec_id}] Exceeded max architecture iterations")
-        spec_data["phase"] = "BLOCKED"
+        spec_data["phase"] = "blocked"
         spec_data["error"] = f"Exceeded max architecture iterations ({max_iterations})"
         save_spec(spec_id, spec_data)
         
     except ImportError as e:
         logger.error(f"Missing dependency: {e}")
         # Fallback: just mark as awaiting approval for manual processing
-        spec_data["phase"] = "AWAITING_ARCH_APPROVAL"
+        spec_data["phase"] = "awaiting_arch_approval"
         spec_data["error"] = f"Auto-processing unavailable: {e}"
         save_spec(spec_id, spec_data)
     
     except Exception as e:
         logger.exception(f"Error processing spec {spec_id}")
-        spec_data["phase"] = "BLOCKED"
+        spec_data["phase"] = "blocked"
         spec_data["error"] = str(e)
         save_spec(spec_id, spec_data)
 
@@ -250,7 +250,7 @@ async def process_implementation_async(spec_id: str, spec_data: Dict[str, Any]) 
             
             spec.iteration = iteration
             spec_data["iteration"] = iteration
-            spec_data["phase"] = "IMPLEMENTATION"
+            spec_data["phase"] = "implementation"
             save_spec(spec_id, spec_data)
             
             tech_stack = spec.get_effective_tech_stack()
@@ -289,7 +289,7 @@ async def process_implementation_async(spec_id: str, spec_data: Dict[str, Any]) 
             if "all tests pass" in output_lower or "verification passed" in output_lower:
                 if "fail" not in output_lower and "error" not in output_lower:
                     logger.info(f"[{spec_id}] Implementation verified!")
-                    spec_data["phase"] = "AWAITING_IMPL_APPROVAL"
+                    spec_data["phase"] = "awaiting_impl_approval"
                     spec_data["verifier_output"] = verify_result.output
                     save_spec(spec_id, spec_data)
                     return
@@ -299,19 +299,19 @@ async def process_implementation_async(spec_id: str, spec_data: Dict[str, Any]) 
             save_spec(spec_id, spec_data)
         
         # Exceeded iterations
-        spec_data["phase"] = "FAILED"
+        spec_data["phase"] = "failed"
         spec_data["error"] = f"Exceeded max implementation iterations ({max_iterations})"
         save_spec(spec_id, spec_data)
         
     except ImportError as e:
         logger.error(f"Missing dependency: {e}")
-        spec_data["phase"] = "AWAITING_IMPL_APPROVAL"
+        spec_data["phase"] = "awaiting_impl_approval"
         spec_data["error"] = f"Auto-processing unavailable: {e}"
         save_spec(spec_id, spec_data)
     
     except Exception as e:
         logger.exception(f"Error during implementation {spec_id}")
-        spec_data["phase"] = "BLOCKED"
+        spec_data["phase"] = "blocked"
         spec_data["error"] = str(e)
         save_spec(spec_id, spec_data)
 
@@ -330,12 +330,12 @@ if HAS_MCP_SDK:
         
         phase_counts: Dict[str, int] = {}
         for spec in specs:
-            phase = spec.get("phase", "UNKNOWN")
+            phase = spec.get("phase", "unknown")
             phase_counts[phase] = phase_counts.get(phase, 0) + 1
         
         pending = [
             s for s in specs 
-            if s.get("phase", "").startswith("AWAITING_")
+            if s.get("phase", "").startswith("awaiting_")
         ]
         
         # Check which specs are actively processing
@@ -372,7 +372,7 @@ if HAS_MCP_SDK:
                 "description": s.get("description", ""),
             }
             for s in specs
-            if s.get("phase", "").startswith("AWAITING_")
+            if s.get("phase", "").startswith("awaiting_")
         ]
         
         return {
@@ -412,7 +412,7 @@ if HAS_MCP_SDK:
             return {"error": f"Spec '{spec_id}' already exists"}
         
         # Initialize spec state
-        spec_data["phase"] = "ARCHITECTURE"
+        spec_data["phase"] = "architecture"
         spec_data["iteration"] = 1
         
         save_spec(spec_id, spec_data)
@@ -420,7 +420,7 @@ if HAS_MCP_SDK:
         result = {
             "success": True,
             "spec_id": spec_id,
-            "phase": "ARCHITECTURE",
+            "phase": "architecture",
             "message": f"Spec '{spec_id}' submitted",
         }
         
@@ -462,7 +462,7 @@ if HAS_MCP_SDK:
         phase = spec.get("phase", "")
         
         # Determine what processing to do
-        if phase == "ARCHITECTURE":
+        if phase == "architecture":
             task = asyncio.create_task(process_spec_async(spec_id, spec))
             _processing_tasks[spec_id] = task
             return {
@@ -472,7 +472,7 @@ if HAS_MCP_SDK:
                 "message": "Architecture processing started",
             }
         
-        elif phase == "IMPLEMENTATION":
+        elif phase == "implementation":
             task = asyncio.create_task(process_implementation_async(spec_id, spec))
             _processing_tasks[spec_id] = task
             return {
@@ -482,14 +482,14 @@ if HAS_MCP_SDK:
                 "message": "Implementation processing started",
             }
         
-        elif phase.startswith("AWAITING_"):
+        elif phase.startswith("awaiting_"):
             return {
                 "success": False,
                 "error": f"Spec '{spec_id}' is awaiting approval ({phase})",
                 "phase": phase,
             }
         
-        elif phase in ("COMPLETE", "FAILED", "BLOCKED"):
+        elif phase in ("complete", "failed", "blocked"):
             return {
                 "success": False,
                 "error": f"Spec '{spec_id}' is in terminal state ({phase})",
@@ -515,9 +515,9 @@ if HAS_MCP_SDK:
         
         # Define phase transitions on approval
         transitions = {
-            "AWAITING_ARCH_APPROVAL": "IMPLEMENTATION",
-            "AWAITING_IMPL_APPROVAL": "INTEGRATION",
-            "AWAITING_INTEG_APPROVAL": "COMPLETE",
+            "awaiting_arch_approval": "implementation",
+            "awaiting_impl_approval": "integration",
+            "awaiting_integ_approval": "complete",
         }
         
         if phase not in transitions:
@@ -547,7 +547,7 @@ if HAS_MCP_SDK:
         }
         
         # Auto-start next phase processing
-        if new_phase in ("IMPLEMENTATION", "INTEGRATION"):
+        if new_phase in ("implementation", "integration"):
             start_result = await ralph_start_processing(spec_id)
             result["processing_started"] = start_result.get("success", False)
         
@@ -568,9 +568,9 @@ if HAS_MCP_SDK:
         phase = spec.get("phase", "")
         
         transitions = {
-            "AWAITING_ARCH_APPROVAL": "ARCHITECTURE",
-            "AWAITING_IMPL_APPROVAL": "IMPLEMENTATION",
-            "AWAITING_INTEG_APPROVAL": "INTEGRATION",
+            "awaiting_arch_approval": "architecture",
+            "awaiting_impl_approval": "implementation",
+            "awaiting_integ_approval": "integration",
         }
         
         if phase not in transitions:
@@ -582,13 +582,13 @@ if HAS_MCP_SDK:
         
         max_iter = spec.get("max_iterations", 15)
         if spec["iteration"] > max_iter:
-            spec["phase"] = "FAILED"
+            spec["phase"] = "failed"
             spec["failure_reason"] = f"Exceeded max iterations ({max_iter})"
             save_spec(spec_id, spec)
             return {
                 "success": False,
                 "spec_id": spec_id,
-                "phase": "FAILED",
+                "phase": "failed",
                 "message": f"Spec failed: exceeded max iterations",
             }
         
@@ -630,8 +630,8 @@ if HAS_MCP_SDK:
         aborted = []
         for spec in specs:
             phase = spec.get("phase", "")
-            if phase not in ("COMPLETE", "FAILED", "BLOCKED"):
-                spec["phase"] = "BLOCKED"
+            if phase not in ("complete", "failed", "blocked"):
+                spec["phase"] = "blocked"
                 spec["block_reason"] = reason
                 save_spec(spec["id"], spec)
                 aborted.append(spec["id"])
