@@ -17,12 +17,42 @@ You receive a spec in JSON format. Key fields:
 3. Run tests
 4. Output structured verification result
 
-## Tech Stack Detection
+## Project Configuration
 
-**IMPORTANT: Check for spec-level tech_stack override FIRST:**
+**IMPORTANT: Check for project-level verifier config FIRST:**
+
+1. Look for `ralph.verifier.json` in the project root
+2. If found, use the settings defined there
+3. If not found, auto-detect based on project files
+
+### ralph.verifier.json Format
+
+```json
+{
+  "project_type": "unity",
+  "test_method": "unity_mcp",
+  "unity": {
+    "test_mode": "EditMode",
+    "assembly_names": []
+  },
+  "file_verification": {
+    "required_extensions": [".cs", ".meta"]
+  }
+}
+```
+
+### Config Fields
+
+- `project_type`: unity, python, typescript, csharp, go, rust, java, custom
+- `test_method`: cli (command line), unity_mcp (Unity MCP), manual (human runs)
+- `test_command`: Custom test command (overrides project_type default)
+
+## Tech Stack Detection (Fallback)
+
+If no `ralph.verifier.json` exists:
 1. Read the spec's `constraints.tech_stack` field - if present, USE THAT LANGUAGE
 2. Check parent spec's constraints if not in current spec
-3. Only fall back to STYLE.md if no spec override exists
+3. Auto-detect from project files (package.json, pyproject.toml, etc.)
 
 The tech_stack determines which test command to run and file extensions to verify.
 
@@ -35,6 +65,37 @@ Run the appropriate test command based on tech_stack:
 - Go: `go test ./...`
 - Java: `mvn test` or `gradle test`
 - Rust: `cargo test`
+- **Unity**: Use `mcp__unityMCP__run_tests` MCP tool (see Unity section below)
+
+## Unity Projects
+
+**IMPORTANT**: Unity projects require special handling because Unity tests cannot run from CLI.
+
+### Detecting Unity Projects
+A project is a Unity project if ANY of these exist:
+- `Assets/` directory
+- `ProjectSettings/` directory
+- `*.unity` scene files
+- `Assembly-CSharp.csproj`
+
+### Running Unity Tests
+For Unity projects, you MUST use the Unity MCP tool instead of CLI:
+
+1. First check if Unity MCP is available by looking for `mcp__unityMCP__run_tests` in your tools
+2. If available, run tests with:
+   ```
+   mcp__unityMCP__run_tests(mode="EditMode")  # For edit-mode tests
+   mcp__unityMCP__run_tests(mode="PlayMode")  # For play-mode tests
+   ```
+3. If Unity MCP is NOT available, report verdict "error" with message:
+   "Unity tests require Unity MCP connection. Ensure Unity Editor is open with MCP server running."
+
+### Unity Test Results
+Parse the Unity MCP test results and map to the standard format:
+- `tests.total` = total test count
+- `tests.passed` = passed test count
+- `tests.failed` = failed test count
+- `tests.failures` = array of failure details
 
 ## REQUIRED OUTPUT FORMAT
 

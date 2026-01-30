@@ -177,6 +177,127 @@ def cleanup_stale_runs() -> dict:
     return db.cleanup_stale_runs()
 
 
+def check_orchestrator_running() -> dict:
+    """Check if an orchestrator is currently running."""
+    import os
+    import subprocess
+
+    # Find project root
+    cwd = Path.cwd()
+    project_root = None
+    for parent in [cwd] + list(cwd.parents):
+        if (parent / ".claude").is_dir():
+            project_root = parent
+            break
+
+    if not project_root:
+        return {"running": False, "error": "Could not find project root"}
+
+    pid_file = project_root / ".orchestrator.pid"
+
+    if not pid_file.exists():
+        return {"running": False, "pid_file": False}
+
+    try:
+        content = pid_file.read_text().strip()
+        pid = int(content.split()[0])
+
+        # Check if process is running
+        if sys.platform == "win32":
+            result = subprocess.run(
+                ["tasklist", "/FI", f"PID eq {pid}", "/NH"],
+                capture_output=True, text=True
+            )
+            running = str(pid) in result.stdout
+        else:
+            try:
+                os.kill(pid, 0)
+                running = True
+            except OSError:
+                running = False
+
+        return {
+            "running": running,
+            "pid": pid,
+            "pid_file": str(pid_file)
+        }
+    except Exception as e:
+        return {"running": False, "error": str(e)}
+
+
+def start_pipeline(spec_path: str, live: bool = True) -> dict:
+    """Start the orchestrator for a spec in the background."""
+    import subprocess
+    import os
+
+    # Find project root
+    cwd = Path.cwd()
+    project_root = None
+    for parent in [cwd] + list(cwd.parents):
+        if (parent / ".claude").is_dir():
+            project_root = parent
+            break
+
+    if not project_root:
+        return {"success": False, "error": "Could not find project root"}
+
+    # Check if orchestrator is already running
+    status = check_orchestrator_running()
+    if status.get("running"):
+        return {
+            "success": False,
+            "error": f"Orchestrator already running (PID {status.get('pid')}). Stop it first or use add_root_spec MCP tool."
+        }
+
+    # Resolve spec path
+    spec_full_path = Path(spec_path)
+    if not spec_full_path.is_absolute():
+        spec_full_path = project_root / spec_path
+
+    if not spec_full_path.exists():
+        return {"success": False, "error": f"Spec not found: {spec_full_path}"}
+
+    # Build command
+    orchestrator_path = project_root / ".claude" / "scripts" / "orchestrator.py"
+    if not orchestrator_path.exists():
+        return {"success": False, "error": f"Orchestrator not found: {orchestrator_path}"}
+
+    cmd = [sys.executable, str(orchestrator_path), "--spec", str(spec_full_path)]
+    if live:
+        cmd.append("--live")
+
+    try:
+        # Start in background
+        if sys.platform == "win32":
+            # Windows: use CREATE_NEW_PROCESS_GROUP
+            process = subprocess.Popen(
+                cmd,
+                cwd=str(project_root),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
+            )
+        else:
+            # Unix: use nohup-style detachment
+            process = subprocess.Popen(
+                cmd,
+                cwd=str(project_root),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True
+            )
+
+        return {
+            "success": True,
+            "pid": process.pid,
+            "spec_path": str(spec_full_path),
+            "live": live,
+            "message": f"Orchestrator started (PID {process.pid}). Use ralph_pipeline_summary to monitor progress."
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
 # =============================================================================
 # MCP SERVER
 # =============================================================================
@@ -298,6 +419,32 @@ def create_status_server():
                     "properties": {}
                 }
             ),
+            Tool(
+                name="ralph_start_pipeline",
+                description="Start the Ralph orchestrator for a spec. Returns immediately - orchestrator runs in background.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "spec_path": {
+                            "type": "string",
+                            "description": "Path to the spec.json file (relative to project root)"
+                        },
+                        "live": {
+                            "type": "boolean",
+                            "description": "Run in live mode (actually spawn agents). Default: true"
+                        }
+                    },
+                    "required": ["spec_path"]
+                }
+            ),
+            Tool(
+                name="ralph_check_orchestrator",
+                description="Check if an orchestrator is currently running.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {}
+                }
+            ),
         ]
 
     @server.call_tool()
@@ -375,6 +522,27 @@ def create_status_server():
 
         elif name == "ralph_cleanup_stale":
             result = cleanup_stale_runs()
+            return [TextContent(
+                type="text",
+                text=json.dumps(result, indent=2)
+            )]
+
+        elif name == "ralph_start_pipeline":
+            spec_path = arguments.get("spec_path")
+            if not spec_path:
+                return [TextContent(
+                    type="text",
+                    text=json.dumps({"error": "spec_path is required"})
+                )]
+            live = arguments.get("live", True)
+            result = start_pipeline(spec_path, live=live)
+            return [TextContent(
+                type="text",
+                text=json.dumps(result, indent=2)
+            )]
+
+        elif name == "ralph_check_orchestrator":
+            result = check_orchestrator_running()
             return [TextContent(
                 type="text",
                 text=json.dumps(result, indent=2)

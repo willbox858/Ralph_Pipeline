@@ -48,12 +48,19 @@ from typing import Optional, Any, Callable, Awaitable
 from enum import Enum
 import traceback
 
+# Force unbuffered output for better monitoring in background tasks
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(line_buffering=True)
+if hasattr(sys.stderr, 'reconfigure'):
+    sys.stderr.reconfigure(line_buffering=True)
+
 # Add lib to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "lib"))
 from spec import (
     Spec, load_spec, save_spec, is_leaf, is_ready,
     create_child_spec, create_shared_spec, Child, spec_to_dict,
-    ClassDef, Criterion, Errors, SharedType
+    ClassDef, Criterion, Errors, SharedType,
+    validate_spec_paths, detect_project_type, fix_protected_paths
 )
 from ralph_db import get_db, RalphDB
 from ralph_db import Spec as DBSpec, Message as DBMessage
@@ -61,6 +68,7 @@ from ralph_db import Spec as DBSpec, Message as DBMessage
 # Import worktree and file ownership management
 from worktree import WorktreeManager, BranchInfo, WorktreeInfo, MergeResult, GitError
 from file_ownership import FileOwnershipTracker, ClaimResult
+from completion_hooks import load_hooks_from_spec, run_hooks
 import atexit
 import signal
 
@@ -169,6 +177,7 @@ class Config:
     dry_run: bool = False
     live: bool = False
     model: str = "claude-opus-4-5-20251101"
+    auto_fix_paths: bool = True  # Automatically redirect .claude/ paths to src/
 
 
 CONFIG = Config()
@@ -313,6 +322,39 @@ class OrchestratorState:
         except Exception as e:
             log(f"Failed to prune worktrees: {e}", "WARN")
 
+    def get_default_branch(self) -> str:
+        """Get the default branch name (main or master) for this repo."""
+        if not self.worktree_mgr:
+            return 'main'  # Fallback
+
+        try:
+            # Try to get from remote HEAD
+            result = self.worktree_mgr._run_git_no_check(
+                'symbolic-ref', 'refs/remotes/origin/HEAD'
+            )
+            if result and result.strip():
+                # Returns something like 'refs/remotes/origin/main'
+                return result.strip().split('/')[-1]
+        except Exception:
+            pass
+
+        # Fallback: check if main or master exists locally
+        try:
+            result = self.worktree_mgr._run_git_no_check('branch', '--list', 'main')
+            if result and 'main' in result:
+                return 'main'
+        except Exception:
+            pass
+
+        try:
+            result = self.worktree_mgr._run_git_no_check('branch', '--list', 'master')
+            if result and 'master' in result:
+                return 'master'
+        except Exception:
+            pass
+
+        return 'main'  # Ultimate fallback
+
     # =========================================================================
     # SPEC OPERATIONS
     # =========================================================================
@@ -437,9 +479,9 @@ class OrchestratorState:
                     # Get parent's branch name
                     parent_branch = self.worktree_mgr._spec_path_to_branch_name(str(parent_status.path))
                 else:
-                    parent_branch = 'main'
+                    parent_branch = self.get_default_branch()
             else:
-                parent_branch = 'main'
+                parent_branch = self.get_default_branch()
 
             # Create branch
             branch_info = self.worktree_mgr.create_spec_branch(spec_path, parent_branch)
@@ -504,9 +546,9 @@ class OrchestratorState:
                 if parent_status:
                     parent_branch = self.worktree_mgr._spec_path_to_branch_name(str(parent_status.path))
                 else:
-                    parent_branch = 'main'
+                    parent_branch = self.get_default_branch()
             else:
-                parent_branch = 'main'
+                parent_branch = self.get_default_branch()
 
             # Perform merge
             result = self.worktree_mgr.merge_up(child_branch, parent_branch)
@@ -1972,7 +2014,7 @@ async def run_implementation_loop(spec: Spec, mcp_server) -> bool:
             elif claim_result.patterns:
                 log(f"Claimed files: {claim_result.patterns}", "INFO", spec.name, spec.depth)
 
-    while spec.ralph_iteration < CONFIG.max_iterations:
+    while (spec.ralph_iteration or 0) < CONFIG.max_iterations:
         spec.ralph_iteration += 1
         log(f"Implementation iteration {spec.ralph_iteration}/{CONFIG.max_iterations}", "IMPL", spec.name, spec.depth)
 
@@ -2165,6 +2207,27 @@ async def process_leaf(spec_path: Path, mcp_server, depth: int) -> bool:
     """Process a leaf spec: Research -> Implement -> Verify"""
     spec = load_spec(spec_path)
     spec.depth = depth
+
+    # Validate and optionally fix spec paths before processing
+    path_warnings = validate_spec_paths(spec)
+    if path_warnings:
+        if CONFIG.auto_fix_paths:
+            # Auto-fix protected paths by redirecting to src/
+            changes = fix_protected_paths(spec)
+            for change in changes:
+                log(f"Auto-fixed path: {change['old_location']} -> {change['new_location']}",
+                    "INFO", spec.name, depth)
+            save_spec(spec)
+        else:
+            # Just warn about protected paths
+            for warning in path_warnings:
+                log(f"WARNING: {warning['message']}", "WARN", spec.name, depth)
+
+    # Detect project type for later use (e.g., Unity test handling)
+    project_type = detect_project_type(spec_path)
+    if project_type != "unknown":
+        log(f"Detected project type: {project_type}", "INFO", spec.name, depth)
+
     spec.status = "in_progress"
     save_spec(spec)
 
@@ -2206,6 +2269,19 @@ async def process_leaf(spec_path: Path, mcp_server, depth: int) -> bool:
         state.update_phase(spec.name, Phase.COMPLETE)
         spec.status = "complete"
 
+        # Run completion hooks if defined
+        hooks = load_hooks_from_spec(spec_path)
+        if hooks:
+            log("Running completion hooks", "HOOKS", spec.name, spec.depth)
+            hook_results = run_hooks(
+                spec_path,
+                hooks,
+                log_func=lambda msg: log(msg, "HOOKS", spec.name, spec.depth)
+            )
+            failed_hooks = [r for r in hook_results if not r.get("success")]
+            if failed_hooks:
+                log(f"Warning: {len(failed_hooks)} hook(s) failed", "WARN", spec.name, spec.depth)
+
         # Merge completed work into parent branch
         if status:
             merge_result = state.merge_completed_spec(str(spec_path), status.parent)
@@ -2236,13 +2312,17 @@ async def process_leaf(spec_path: Path, mcp_server, depth: int) -> bool:
 
     # Notify parent if we have one
     if status and status.parent:
-        state.add_message(
-            from_spec=spec.name,
-            to_spec=status.parent,
-            msg_type="child_complete",
-            payload={"child": spec.name, "success": success},
-            priority=Priority.NORMAL
-        )
+        try:
+            state.add_message(
+                from_spec=spec.name,
+                to_spec=status.parent,
+                msg_type="child_complete",
+                payload={"child": spec.name, "success": success},
+                priority=Priority.NORMAL
+            )
+        except Exception as e:
+            # Don't crash if parent notification fails (e.g., parent spec was deleted)
+            log(f"Failed to notify parent '{status.parent}': {e}", "WARN", spec.name, spec.depth)
 
     return success
 
@@ -2344,6 +2424,21 @@ async def finalize_non_leaf(spec: Spec, mcp_server, status: SpecStatus) -> bool:
         state.update_phase(spec.name, Phase.COMPLETE)
         spec.status = "complete"
         spec.integration_tests_passed = True
+
+        # Run completion hooks if defined
+        spec_path = Path(status.path) if status else None
+        if spec_path:
+            hooks = load_hooks_from_spec(spec_path)
+            if hooks:
+                log("Running completion hooks", "HOOKS", spec.name, spec.depth)
+                hook_results = run_hooks(
+                    spec_path,
+                    hooks,
+                    log_func=lambda msg: log(msg, "HOOKS", spec.name, spec.depth)
+                )
+                failed_hooks = [r for r in hook_results if not r.get("success")]
+                if failed_hooks:
+                    log(f"Warning: {len(failed_hooks)} hook(s) failed", "WARN", spec.name, spec.depth)
     else:
         state.update_phase(spec.name, Phase.BLOCKED)
         spec.status = "blocked"
@@ -2353,13 +2448,17 @@ async def finalize_non_leaf(spec: Spec, mcp_server, status: SpecStatus) -> bool:
 
     # Notify parent
     if status.parent:
-        state.add_message(
-            from_spec=spec.name,
-            to_spec=status.parent,
-            msg_type="child_complete",
-            payload={"child": spec.name, "success": success},
-            priority=Priority.NORMAL
-        )
+        try:
+            state.add_message(
+                from_spec=spec.name,
+                to_spec=status.parent,
+                msg_type="child_complete",
+                payload={"child": spec.name, "success": success},
+                priority=Priority.NORMAL
+            )
+        except Exception as e:
+            # Don't crash if parent notification fails (e.g., parent spec was deleted)
+            log(f"Failed to notify parent '{status.parent}': {e}", "WARN", spec.name, spec.depth)
 
     return success
 
@@ -2402,6 +2501,11 @@ async def orchestrator_main(root_spec_paths: list[Path]):
     STATE = OrchestratorState(db)
 
     log(f"Database initialized at {db.db_path}", "INFO")
+
+    # Clean up stale agent runs from previous crashed sessions
+    stale_cleanup = db.cleanup_stale_runs()
+    if stale_cleanup["cleaned"] > 0:
+        log(f"Cleaned up {stale_cleanup['cleaned']} stale agent runs", "INFO")
 
     # Initialize worktree management
     STATE.init_worktree_management()

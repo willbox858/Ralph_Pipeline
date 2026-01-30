@@ -392,9 +392,144 @@ def save_spec(spec: Spec, path: Optional[Path] = None) -> None:
     path = path or spec.path
     if not path:
         raise ValueError("No path specified for saving spec")
-    
+
     data = spec_to_dict(spec)
     path.write_text(json.dumps(data, indent=2), encoding='utf-8')
+
+
+# =============================================================================
+# VALIDATION
+# =============================================================================
+
+# Protected paths that agents cannot modify
+PROTECTED_PATHS = [
+    ".claude/",
+    ".git/",
+    ".ralph/",
+]
+
+# Recommended target directories for different file types
+RECOMMENDED_TARGETS = {
+    ".claude/scripts/": "src/ralph/",
+    ".claude/lib/": "src/ralph/lib/",
+    ".claude/agents/": "src/ralph/agents/",
+    ".claude/commands/": "src/ralph/commands/",
+}
+
+
+def suggest_src_path(protected_path: str) -> str:
+    """Suggest a src/ equivalent for a protected path."""
+    for protected, suggested in RECOMMENDED_TARGETS.items():
+        if protected_path.startswith(protected):
+            return protected_path.replace(protected, suggested, 1)
+
+    # Generic fallback: replace .claude/ with src/
+    if protected_path.startswith(".claude/"):
+        return protected_path.replace(".claude/", "src/", 1)
+
+    # For other protected paths, just suggest src/
+    filename = protected_path.split("/")[-1]
+    return f"src/{filename}"
+
+
+def validate_spec_paths(spec: Spec) -> list[dict]:
+    """
+    Validate that spec doesn't target protected paths.
+
+    Returns a list of warnings for paths that may cause permission issues.
+    Each warning includes a suggested alternative path in src/.
+    """
+    warnings = []
+
+    for cls in spec.classes:
+        location = cls.location or ""
+        for protected in PROTECTED_PATHS:
+            if location.startswith(protected) or f"/{protected}" in location:
+                suggested = suggest_src_path(location)
+                warnings.append({
+                    "type": "protected_path",
+                    "class": cls.name,
+                    "location": location,
+                    "protected_prefix": protected,
+                    "suggested_location": suggested,
+                    "message": f"Class '{cls.name}' targets protected path '{location}'. "
+                              f"Agents cannot modify files in '{protected}'. "
+                              f"Change location to '{suggested}' instead."
+                })
+
+    return warnings
+
+
+def fix_protected_paths(spec: Spec) -> list[dict]:
+    """
+    Automatically fix protected paths in a spec by redirecting to src/.
+
+    Returns list of changes made.
+    """
+    changes = []
+
+    for cls in spec.classes:
+        location = cls.location or ""
+        for protected in PROTECTED_PATHS:
+            if location.startswith(protected) or f"/{protected}" in location:
+                old_location = cls.location
+                cls.location = suggest_src_path(location)
+                changes.append({
+                    "class": cls.name,
+                    "old_location": old_location,
+                    "new_location": cls.location
+                })
+                break  # Only fix once per class
+
+    return changes
+
+
+def detect_project_type(spec_path: Path) -> str:
+    """
+    Detect the project type based on files present.
+
+    Returns: 'unity', 'python', 'typescript', 'csharp', 'go', 'rust', 'java', 'unknown'
+    """
+    # Walk up to find project root
+    project_root = spec_path.parent
+    for _ in range(10):
+        if (project_root / ".claude").exists() or (project_root / ".git").exists():
+            break
+        if project_root.parent == project_root:
+            break
+        project_root = project_root.parent
+
+    # Unity detection
+    if (project_root / "Assets").is_dir() or (project_root / "ProjectSettings").is_dir():
+        return "unity"
+
+    # Python
+    if (project_root / "pyproject.toml").exists() or (project_root / "setup.py").exists():
+        return "python"
+    if list(project_root.glob("*.py")):
+        return "python"
+
+    # TypeScript/Node
+    if (project_root / "package.json").exists():
+        return "typescript"
+
+    # C#/.NET
+    if list(project_root.glob("*.csproj")) or list(project_root.glob("*.sln")):
+        return "csharp"
+
+    # Go
+    if (project_root / "go.mod").exists():
+        return "go"
+
+    # Rust
+    if (project_root / "Cargo.toml").exists():
+        return "rust"
+
+    # Java
+    if (project_root / "pom.xml").exists() or (project_root / "build.gradle").exists():
+        return "java"
+
+    return "unknown"
 
 
 # =============================================================================
