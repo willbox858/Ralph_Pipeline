@@ -260,6 +260,116 @@ if HAS_MCP_SDK:
             }
 
     # =========================================================================
+    # RESTART TOOLS
+    # =========================================================================
+
+    @mcp.tool()
+    async def restart_spec(
+        spec_id: str,
+        target_phase: str = "",
+        reset_iteration: bool = True,
+        clear_errors: bool = False,
+        reason: str = "",
+    ) -> Dict[str, Any]:
+        """
+        Restart a FAILED or BLOCKED spec from a specified phase.
+
+        Use this to recover specs that have hit max iterations, encountered
+        unrecoverable errors, or are blocked waiting for intervention.
+
+        Args:
+            spec_id: The ID of the spec to restart
+            target_phase: Phase to restart from. Options:
+                - "architecture": Restart architecture design (full redo)
+                - "implementation": Restart implementation (keep architecture)
+                - "integration": Restart integration (for non-leaf specs)
+                If empty, auto-selects based on spec.is_leaf.
+            reset_iteration: If True (default), reset iteration counter to 0.
+            clear_errors: If True, clear accumulated errors before restart.
+                Default False preserves error history for context.
+            reason: Explanation of why restarting (logged in transition history).
+        """
+        orch = get_orchestrator()
+        spec = orch.get_spec(spec_id)
+
+        if spec is None:
+            return {"error": f"Spec '{spec_id}' not found"}
+
+        # Validate target_phase if provided
+        valid_phases = {"", "architecture", "implementation", "integration"}
+        if target_phase not in valid_phases:
+            return {
+                "error": f"Invalid target_phase '{target_phase}'. "
+                         f"Valid options: architecture, implementation, integration"
+            }
+
+        try:
+            result = await orch.restart_spec(
+                spec_id=spec_id,
+                target_phase=target_phase or None,
+                reset_iteration=reset_iteration,
+                clear_errors=clear_errors,
+                reason=reason,
+            )
+            return result
+
+        except Exception as e:
+            logger.exception(f"Error restarting spec {spec_id}")
+            return {
+                "success": False,
+                "error": str(e),
+            }
+
+    @mcp.tool()
+    def get_restartable_specs() -> Dict[str, Any]:
+        """
+        Get list of specs that can be restarted (FAILED or BLOCKED).
+
+        Returns specs in FAILED or BLOCKED phase with context about why
+        they are in that state and what restart options are available.
+        """
+        from ..core.phase import Phase, PHASE_TRANSITIONS
+
+        orch = get_orchestrator()
+
+        restartable = []
+
+        for spec in orch.spec_store.list_all():
+            if spec.phase not in (Phase.FAILED, Phase.BLOCKED):
+                continue
+
+            # Determine valid restart options
+            valid_transitions = PHASE_TRANSITIONS.get(spec.phase, set())
+            restart_options = [p.value for p in valid_transitions]
+
+            # Filter based on is_leaf
+            if spec.is_leaf:
+                restart_options = [p for p in restart_options if p != "integration"]
+            elif spec.is_leaf is False:
+                restart_options = [p for p in restart_options if p != "implementation"]
+
+            # Get last error summary
+            last_error = spec.get_latest_error() if spec.errors else None
+            error_summary = last_error.message[:200] if last_error else "No error details"
+
+            restartable.append({
+                "id": spec.id,
+                "name": spec.name,
+                "phase": spec.phase.value,
+                "is_leaf": spec.is_leaf,
+                "iteration": spec.iteration,
+                "max_iterations": spec.max_iterations,
+                "error_count": len(spec.errors),
+                "error_summary": error_summary,
+                "restart_options": restart_options,
+            })
+
+        return {
+            "count": len(restartable),
+            "specs": restartable,
+        }
+
+    # =========================================================================
     # AGENT-FACING TOOLS (for Proposer, Implementer, Verifier, etc.)
     # =========================================================================
 

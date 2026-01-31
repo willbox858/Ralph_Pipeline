@@ -247,6 +247,117 @@ class Orchestrator:
         for task in self._running_agents.values():
             task.cancel()
         self._status.running = False
+
+    async def restart_spec(
+        self,
+        spec_id: str,
+        target_phase: Optional[str] = None,
+        reset_iteration: bool = True,
+        clear_errors: bool = False,
+        reason: str = "",
+    ) -> Dict[str, Any]:
+        """
+        Restart a FAILED or BLOCKED spec to retry from a specific phase.
+
+        Args:
+            spec_id: The spec to restart
+            target_phase: Target phase ("architecture", "implementation", "integration").
+                          If None, auto-selects based on spec.is_leaf.
+            reset_iteration: If True, reset iteration counter to 0 (default: True)
+            clear_errors: If True, clear error history (default: False)
+            reason: Explanation of why restarting (logged in transition history)
+
+        Returns:
+            Dict with success, phase info, and message or error
+        """
+        from ..core.phase import Phase, PHASE_TRANSITIONS
+
+        # Validate spec exists
+        spec = self.spec_store.get(spec_id)
+        if spec is None:
+            return {"success": False, "error": f"Spec '{spec_id}' not found"}
+
+        # Validate current phase is restartable
+        if spec.phase not in (Phase.FAILED, Phase.BLOCKED):
+            return {
+                "success": False,
+                "error": f"Spec '{spec_id}' is in phase '{spec.phase.value}' - "
+                         f"can only restart FAILED or BLOCKED specs",
+            }
+
+        # Map string to Phase enum
+        phase_map = {
+            "architecture": Phase.ARCHITECTURE,
+            "implementation": Phase.IMPLEMENTATION,
+            "integration": Phase.INTEGRATION,
+        }
+
+        # Auto-select target phase if not specified
+        if target_phase is None:
+            if spec.is_leaf:
+                target = Phase.IMPLEMENTATION
+            else:
+                target = Phase.ARCHITECTURE
+        else:
+            target = phase_map.get(target_phase.lower())
+            if target is None:
+                return {
+                    "success": False,
+                    "error": f"Invalid target_phase '{target_phase}'. "
+                             f"Must be: architecture, implementation, or integration",
+                }
+
+        # Validate transition is allowed
+        valid_targets = PHASE_TRANSITIONS.get(spec.phase, set())
+        if target not in valid_targets:
+            valid_list = [p.value for p in valid_targets]
+            return {
+                "success": False,
+                "error": f"Cannot restart from {spec.phase.value} to {target.value}. "
+                         f"Valid targets: {valid_list}",
+            }
+
+        # Record previous state
+        previous_phase = spec.phase.value
+        preserved_error_count = len(spec.errors)
+
+        # Reset iteration if requested
+        if reset_iteration:
+            spec.iteration = 0
+
+        # Clear errors if requested
+        if clear_errors:
+            spec.errors = []
+
+        # Perform the transition
+        result = self.state_machine.transition(
+            spec,
+            target,
+            triggered_by="user",
+            reason=reason or f"Manual restart from {previous_phase}",
+        )
+
+        if not result.success:
+            return {"success": False, "error": result.error}
+
+        # Save and execute side effects
+        self.spec_store.save(spec)
+        await self.state_machine.execute_side_effects(spec, result.side_effects)
+
+        # Clean up pending approvals list if spec was there
+        if spec_id in self._status.pending_approvals:
+            self._status.pending_approvals.remove(spec_id)
+
+        return {
+            "success": True,
+            "spec_id": spec_id,
+            "spec_name": spec.name,
+            "previous_phase": previous_phase,
+            "new_phase": target.value,
+            "iteration": spec.iteration,
+            "errors_preserved": 0 if clear_errors else preserved_error_count,
+            "message": f"Spec restarted: {previous_phase} -> {target.value}",
+        }
     
     # =========================================================================
     # INTERNAL PROCESSING
