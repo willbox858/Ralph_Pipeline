@@ -1,24 +1,35 @@
 {
   "name": "MyUnityGame",
-  "tech_stack": {
-    "language": "C#",
-    "runtime": "Unity 2022.3",
-    "frameworks": ["Unity"],
-    "test_framework": "Unity Test Framework",
-    "build_command": "",
-    "test_command": "",
-    "mcp_tools": ["unity"]
-  },
-  "mcp_servers": [
-    {
-      "name": "unity",
+  "tech_stack": "unity",
+  "mcp_servers": {
+    "unity": {
+      "type": "stdio",
       "command": "npx",
       "args": ["-y", "@anthropic/mcp-unity"],
       "env": {
         "UNITY_PROJECT_PATH": "."
-      }
+      },
+      "tools": [
+        "mcp__unity__run_tests",
+        "mcp__unity__get_logs",
+        "mcp__unity__compile",
+        "mcp__unity__open_scene",
+        "mcp__unity__get_hierarchy",
+        "mcp__unity__get_components",
+        "mcp__unity__execute_menu_item"
+      ]
     }
-  ],
+  },
+  "role_overrides": {
+    "implementer": {
+      "additional_tools": [],
+      "remove_tools": []
+    },
+    "verifier": {
+      "additional_tools": [],
+      "remove_tools": []
+    }
+  },
   "specs_dir": "Specs/Active",
   "source_dir": "Assets/Scripts",
   "max_iterations": 15

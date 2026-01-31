@@ -51,19 +51,22 @@ ROLE_TEAMS: Dict[AgentRole, Team] = {
 @dataclass
 class RoleConfig:
     """Configuration for an agent role."""
-    
+
     role: AgentRole
     team: Team
     description: str
-    
+
     # Capabilities
     can_write_files: bool = False
     can_run_commands: bool = False
     can_modify_spec: bool = False
-    
+
     # Iteration limits
     max_iterations: int = 15
-    
+
+    # SDK conversation turns per invocation
+    max_turns: int = 50
+
     # System prompt (loaded from file or inline)
     system_prompt: str = ""
     
@@ -201,7 +204,7 @@ Given a rough feature description, help create a complete spec by:
 
 ## Output
 
-Update the spec with your refinements using the ralph_update_spec tool.
+Update the spec with your refinements using the `mcp__ralph__update_spec` tool.
 Be specific and concrete - avoid vague requirements.
 """,
 
@@ -230,11 +233,13 @@ Given a spec, decide:
 
 ## Output
 
-Use ralph_update_spec to set:
+Use `mcp__ralph__update_spec` to set:
 - is_leaf (boolean)
 - classes (for leaves) 
 - children (for non-leaves)
 - shared_types (if needed)
+
+When done, use `mcp__ralph__send_message` with message_type="phase_complete".
 
 Be decisive. Err toward smaller scopes.
 """,
@@ -261,10 +266,9 @@ Examine the proposed architecture and:
 
 ## Output
 
-Use ralph_send_message to send your critique:
-- List specific concerns
-- Suggest concrete improvements
-- State whether you approve or reject
+Use `mcp__ralph__send_message` with message_type="approval_response" to send your verdict:
+- payload.approved = true/false
+- payload.feedback = your detailed feedback
 
 Be constructive but rigorous.
 """,
@@ -275,7 +279,7 @@ You write code to satisfy spec requirements.
 
 ## Your Task
 
-1. Read the spec completely
+1. Read the spec completely (use `mcp__ralph__get_spec`)
 2. Check for previous errors in spec.errors
 3. Implement all classes in spec.classes
 4. Satisfy all acceptance criteria
@@ -284,15 +288,17 @@ You write code to satisfy spec requirements.
 
 **Only modify files listed in spec.classes.**
 
-If you need something outside your scope, use ralph_send_message to escalate.
+If you need something outside your scope, use `mcp__ralph__send_message` to escalate.
 
 ## On Errors
 
-If spec.errors exists, make targeted fixes. Don't rewrite everything.
+If previous errors exist, make targeted fixes. Don't rewrite everything.
 
 ## Output
 
-Create/modify files as needed. When done, use ralph_send_message with type "phase_complete".
+Create/modify files as needed. When done, use `mcp__ralph__send_message` with:
+- message_type="phase_complete"
+- payload.success=true
 """,
 
     AgentRole.VERIFIER: """# Verifier
@@ -313,7 +319,12 @@ You run tests and verify implementations.
 
 ## Output
 
-Use ralph_report_error to report any issues found.
+If errors found, use `mcp__ralph__report_error` with:
+- category: "compilation", "test", or "runtime"
+- message: description of the issue
+- details: file, line, stack trace, etc.
+
+If all passes, use `mcp__ralph__send_message` with message_type="phase_complete".
 
 Be thorough. Failures should have clear, actionable details.
 """,

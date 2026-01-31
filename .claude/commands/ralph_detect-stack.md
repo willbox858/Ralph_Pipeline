@@ -57,6 +57,7 @@ Create or update `ralph.config.json`:
   "mcp_servers": [
     {
       "name": "unity",
+      "type": "stdio",
       "command": "npx",
       "args": ["-y", "@anthropic/mcp-unity"],
       "env": {"UNITY_PROJECT_PATH": "."}

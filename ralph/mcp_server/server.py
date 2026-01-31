@@ -4,17 +4,17 @@ MCP Server for the Ralph pipeline.
 Uses the official MCP Python SDK (FastMCP) to provide tools
 for the Interface Agent to interact with the orchestrator.
 
-This server:
-1. Manages spec state (submit, approve, reject)
-2. Actually RUNS the orchestrator to process specs
-3. Invokes Claude agents via the Agent SDK
+This server is a thin frontend that:
+1. Receives MCP tool calls
+2. Translates them to Orchestrator method calls
+3. Returns results
+
+All orchestration logic lives in the Orchestrator.
 """
 
 from typing import Dict, Any, List, Optional
 from pathlib import Path
-import json
 import sys
-import asyncio
 import logging
 
 # Configure logging to stderr (stdout breaks MCP protocol)
@@ -36,284 +36,36 @@ except ImportError:
 def find_project_root() -> Path:
     """Find the project root by looking for ralph.config.json."""
     cwd = Path.cwd()
-    
+
     # Check current dir and parents
     for path in [cwd, *cwd.parents]:
         if (path / "ralph.config.json").exists():
             return path
         if path == path.parent:
             break
-    
+
     return cwd
 
 
-def get_state_dir() -> Path:
-    """Get the Ralph state directory."""
-    project_root = find_project_root()
-    state_dir = project_root / ".ralph" / "state"
-    state_dir.mkdir(parents=True, exist_ok=True)
-    return state_dir
-
-
-def load_specs() -> List[Dict[str, Any]]:
-    """Load all specs from state directory."""
-    state_dir = get_state_dir()
-    specs_dir = state_dir / "specs"
-    
-    if not specs_dir.exists():
-        return []
-    
-    specs = []
-    for spec_file in specs_dir.glob("*.json"):
-        try:
-            with open(spec_file) as f:
-                specs.append(json.load(f))
-        except (json.JSONDecodeError, IOError):
-            pass
-    
-    return specs
-
-
-def load_spec(spec_id: str) -> Dict[str, Any] | None:
-    """Load a specific spec by ID."""
-    state_dir = get_state_dir()
-    spec_file = state_dir / "specs" / f"{spec_id}.json"
-    
-    if spec_file.exists():
-        try:
-            with open(spec_file) as f:
-                return json.load(f)
-        except (json.JSONDecodeError, IOError):
-            pass
-    
-    return None
-
-
-def save_spec(spec_id: str, spec_data: Dict[str, Any]) -> None:
-    """Save a spec to the state directory."""
-    state_dir = get_state_dir()
-    specs_dir = state_dir / "specs"
-    specs_dir.mkdir(parents=True, exist_ok=True)
-    
-    spec_file = specs_dir / f"{spec_id}.json"
-    with open(spec_file, "w") as f:
-        json.dump(spec_data, f, indent=2)
-
-
 # =============================================================================
-# ORCHESTRATOR INTEGRATION
+# ORCHESTRATOR SINGLETON
 # =============================================================================
 
-# Track running processing tasks
-_processing_tasks: Dict[str, asyncio.Task] = {}
+_orchestrator: Optional["Orchestrator"] = None
 
 
-async def process_spec_async(spec_id: str, spec_data: Dict[str, Any]) -> None:
-    """
-    Process a spec through the pipeline until it needs approval.
-    
-    This runs the architecture team (Proposer → Critic loop) and
-    transitions the spec to AWAITING_ARCH_APPROVAL when ready.
-    """
-    logger.info(f"Starting processing for spec: {spec_id}")
-    
-    project_root = find_project_root()
-    max_iterations = spec_data.get("max_iterations", 5)
-    
-    # Try to use the full orchestrator if available
-    try:
-        from ..orchestrator.engine import Orchestrator, PipelineConfig
-        from ..core.spec import Spec
-        from ..core.phase import Phase
-        from ..agents.invoker import AgentInvoker
-        from ..agents.roles import AgentRole
-        
-        config = PipelineConfig(
-            max_arch_iterations=max_iterations,
-            max_iterations=15,
-        )
-        
-        orchestrator = Orchestrator(project_root, config=config)
-        
-        # Convert dict to Spec object
-        spec = Spec.from_dict(spec_data)
-        spec.phase = Phase.ARCHITECTURE
-        
-        # Run architecture loop
-        for iteration in range(1, max_iterations + 1):
-            logger.info(f"[{spec_id}] Architecture iteration {iteration}/{max_iterations}")
-            
-            # Update state
-            spec.iteration = iteration
-            spec_data["iteration"] = iteration
-            spec_data["phase"] = "architecture"
-            save_spec(spec_id, spec_data)
-            
-            tech_stack = spec.get_effective_tech_stack()
-            
-            # Invoke Proposer
-            logger.info(f"[{spec_id}] Invoking Proposer...")
-            proposer_result = await orchestrator.agent_invoker.invoke(
-                role=AgentRole.PROPOSER,
-                spec=spec,
-                tech_stack=tech_stack,
-                iteration=iteration,
-            )
-            
-            if not proposer_result.success:
-                logger.error(f"[{spec_id}] Proposer failed: {proposer_result.error}")
-                spec_data["phase"] = "blocked"
-                spec_data["error"] = proposer_result.error
-                save_spec(spec_id, spec_data)
-                return
-            
-            # Track artifacts
-            spec_data["artifacts"] = proposer_result.artifacts
-            save_spec(spec_id, spec_data)
-            
-            # Invoke Critic
-            logger.info(f"[{spec_id}] Invoking Critic...")
-            critic_result = await orchestrator.agent_invoker.invoke(
-                role=AgentRole.CRITIC,
-                spec=spec,
-                tech_stack=tech_stack,
-                iteration=iteration,
-            )
-            
-            if not critic_result.success:
-                logger.error(f"[{spec_id}] Critic failed: {critic_result.error}")
-                continue  # Try again
-            
-            # Check if critic approved
-            output_lower = critic_result.output.lower()
-            if "approved" in output_lower or "lgtm" in output_lower:
-                if "reject" not in output_lower:
-                    logger.info(f"[{spec_id}] Architecture approved by Critic!")
-                    spec_data["phase"] = "awaiting_arch_approval"
-                    spec_data["critic_feedback"] = critic_result.output
-                    save_spec(spec_id, spec_data)
-                    return
-            
-            # Critic rejected, continue loop
-            logger.info(f"[{spec_id}] Critic requested changes, continuing...")
-            spec_data["critic_feedback"] = critic_result.output
-            save_spec(spec_id, spec_data)
-        
-        # Exceeded max iterations
-        logger.warning(f"[{spec_id}] Exceeded max architecture iterations")
-        spec_data["phase"] = "blocked"
-        spec_data["error"] = f"Exceeded max architecture iterations ({max_iterations})"
-        save_spec(spec_id, spec_data)
-        
-    except ImportError as e:
-        logger.error(f"Missing dependency: {e}")
-        # Fallback: just mark as awaiting approval for manual processing
-        spec_data["phase"] = "awaiting_arch_approval"
-        spec_data["error"] = f"Auto-processing unavailable: {e}"
-        save_spec(spec_id, spec_data)
-    
-    except Exception as e:
-        logger.exception(f"Error processing spec {spec_id}")
-        spec_data["phase"] = "blocked"
-        spec_data["error"] = str(e)
-        save_spec(spec_id, spec_data)
+def get_orchestrator() -> "Orchestrator":
+    """Get or create the singleton Orchestrator instance."""
+    global _orchestrator
+    if _orchestrator is None:
+        from ..orchestrator import Orchestrator, PipelineConfig
 
+        project_root = find_project_root()
+        config = PipelineConfig()
+        _orchestrator = Orchestrator(project_root, config=config)
+        logger.info(f"Initialized Orchestrator for project: {project_root}")
 
-async def process_implementation_async(spec_id: str, spec_data: Dict[str, Any]) -> None:
-    """
-    Process implementation phase for a spec.
-    
-    Runs Implementer → Verifier loop until tests pass.
-    """
-    logger.info(f"Starting implementation for spec: {spec_id}")
-    
-    project_root = find_project_root()
-    max_iterations = spec_data.get("max_iterations", 15)
-    
-    try:
-        from ..orchestrator.engine import Orchestrator, PipelineConfig
-        from ..core.spec import Spec
-        from ..core.phase import Phase
-        from ..agents.invoker import AgentInvoker
-        from ..agents.roles import AgentRole
-        
-        config = PipelineConfig(max_iterations=max_iterations)
-        orchestrator = Orchestrator(project_root, config=config)
-        
-        spec = Spec.from_dict(spec_data)
-        spec.phase = Phase.IMPLEMENTATION
-        
-        start_iteration = spec_data.get("iteration", 1)
-        
-        for iteration in range(start_iteration, max_iterations + 1):
-            logger.info(f"[{spec_id}] Implementation iteration {iteration}/{max_iterations}")
-            
-            spec.iteration = iteration
-            spec_data["iteration"] = iteration
-            spec_data["phase"] = "implementation"
-            save_spec(spec_id, spec_data)
-            
-            tech_stack = spec.get_effective_tech_stack()
-            
-            # Invoke Implementer
-            logger.info(f"[{spec_id}] Invoking Implementer...")
-            impl_result = await orchestrator.agent_invoker.invoke(
-                role=AgentRole.IMPLEMENTER,
-                spec=spec,
-                tech_stack=tech_stack,
-                iteration=iteration,
-            )
-            
-            if not impl_result.success:
-                logger.error(f"[{spec_id}] Implementer failed: {impl_result.error}")
-                continue
-            
-            spec_data["artifacts"] = impl_result.artifacts
-            save_spec(spec_id, spec_data)
-            
-            # Invoke Verifier
-            logger.info(f"[{spec_id}] Invoking Verifier...")
-            verify_result = await orchestrator.agent_invoker.invoke(
-                role=AgentRole.VERIFIER,
-                spec=spec,
-                tech_stack=tech_stack,
-                iteration=iteration,
-            )
-            
-            if not verify_result.success:
-                logger.error(f"[{spec_id}] Verifier failed: {verify_result.error}")
-                continue
-            
-            # Check if tests passed
-            output_lower = verify_result.output.lower()
-            if "all tests pass" in output_lower or "verification passed" in output_lower:
-                if "fail" not in output_lower and "error" not in output_lower:
-                    logger.info(f"[{spec_id}] Implementation verified!")
-                    spec_data["phase"] = "awaiting_impl_approval"
-                    spec_data["verifier_output"] = verify_result.output
-                    save_spec(spec_id, spec_data)
-                    return
-            
-            logger.info(f"[{spec_id}] Verification failed, continuing...")
-            spec_data["verifier_output"] = verify_result.output
-            save_spec(spec_id, spec_data)
-        
-        # Exceeded iterations
-        spec_data["phase"] = "failed"
-        spec_data["error"] = f"Exceeded max implementation iterations ({max_iterations})"
-        save_spec(spec_id, spec_data)
-        
-    except ImportError as e:
-        logger.error(f"Missing dependency: {e}")
-        spec_data["phase"] = "awaiting_impl_approval"
-        spec_data["error"] = f"Auto-processing unavailable: {e}"
-        save_spec(spec_id, spec_data)
-    
-    except Exception as e:
-        logger.exception(f"Error during implementation {spec_id}")
-        spec_data["phase"] = "blocked"
-        spec_data["error"] = str(e)
-        save_spec(spec_id, spec_data)
+    return _orchestrator
 
 
 # =============================================================================
@@ -322,359 +74,368 @@ async def process_implementation_async(spec_id: str, spec_data: Dict[str, Any]) 
 
 if HAS_MCP_SDK:
     mcp = FastMCP("ralph")
-    
+
     @mcp.tool()
-    def ralph_get_status() -> Dict[str, Any]:
+    def get_status() -> Dict[str, Any]:
         """Get current pipeline status including all specs and their phases."""
-        specs = load_specs()
-        
-        phase_counts: Dict[str, int] = {}
-        for spec in specs:
-            phase = spec.get("phase", "unknown")
-            phase_counts[phase] = phase_counts.get(phase, 0) + 1
-        
-        pending = [
-            s for s in specs 
-            if s.get("phase", "").startswith("awaiting_")
-        ]
-        
-        # Check which specs are actively processing
-        processing = list(_processing_tasks.keys())
-        
-        return {
-            "total_specs": len(specs),
-            "phase_counts": phase_counts,
-            "pending_approvals": len(pending),
-            "actively_processing": processing,
-            "specs": [
-                {
-                    "id": s.get("id"),
-                    "name": s.get("name"),
-                    "phase": s.get("phase"),
-                    "iteration": s.get("iteration", 1),
-                    "processing": s.get("id") in _processing_tasks,
-                }
-                for s in specs
-            ],
-        }
-    
+        orch = get_orchestrator()
+        return orch.get_status_summary()
+
     @mcp.tool()
-    def ralph_get_pending_approvals() -> Dict[str, Any]:
+    def get_pending_approvals() -> Dict[str, Any]:
         """Get list of specs awaiting user approval."""
-        specs = load_specs()
-        
-        pending = [
-            {
-                "id": s.get("id"),
-                "name": s.get("name"),
-                "phase": s.get("phase"),
-                "iteration": s.get("iteration", 1),
-                "description": s.get("description", ""),
-            }
-            for s in specs
-            if s.get("phase", "").startswith("awaiting_")
-        ]
-        
+        orch = get_orchestrator()
+        pending = orch.get_pending_approvals()
+
         return {
             "count": len(pending),
-            "specs": pending,
+            "specs": [
+                {
+                    "id": p.spec_id,
+                    "name": p.spec_name,
+                    "approval_type": p.approval_type,
+                    "summary": p.summary,
+                    "files_to_review": p.files_to_review,
+                }
+                for p in pending
+            ],
         }
-    
+
     @mcp.tool()
-    def ralph_get_spec(spec_id: str) -> Dict[str, Any]:
+    def get_spec(spec_id: str) -> Dict[str, Any]:
         """Get details of a specific spec by ID."""
-        spec = load_spec(spec_id)
-        
+        orch = get_orchestrator()
+        spec = orch.get_spec(spec_id)
+
         if spec is None:
             return {"error": f"Spec '{spec_id}' not found"}
-        
-        return spec
-    
+
+        return spec.to_dict()
+
     @mcp.tool()
-    async def ralph_submit_spec(
+    async def submit_spec(
         spec_data: Dict[str, Any],
         auto_start: bool = True,
     ) -> Dict[str, Any]:
         """
         Submit a new spec to the pipeline.
-        
+
         Args:
             spec_data: The spec data including id, name, problem, etc.
             auto_start: If True, automatically start processing (default: True)
         """
         spec_id = spec_data.get("id")
-        
+
         if not spec_id:
             return {"error": "Spec must have an 'id' field"}
-        
-        existing = load_spec(spec_id)
+
+        orch = get_orchestrator()
+
+        # Check if spec already exists
+        existing = orch.get_spec(spec_id)
         if existing:
             return {"error": f"Spec '{spec_id}' already exists"}
-        
-        # Initialize spec state
-        spec_data["phase"] = "architecture"
-        spec_data["iteration"] = 1
-        
-        save_spec(spec_id, spec_data)
-        
-        result = {
-            "success": True,
-            "spec_id": spec_id,
-            "phase": "architecture",
-            "message": f"Spec '{spec_id}' submitted",
-        }
-        
-        # Auto-start processing
-        if auto_start:
-            start_result = await ralph_start_processing(spec_id)
-            result["processing_started"] = start_result.get("success", False)
-            if not start_result.get("success"):
-                result["processing_error"] = start_result.get("error")
-        
-        return result
-    
+
+        try:
+            # Submit to orchestrator - this handles all processing
+            returned_id = await orch.submit_spec(spec_data)
+            spec = orch.get_spec(returned_id)
+
+            return {
+                "success": True,
+                "spec_id": returned_id,
+                "phase": spec.phase.value if spec else "unknown",
+                "message": f"Spec '{returned_id}' submitted and processing started",
+            }
+        except Exception as e:
+            logger.exception(f"Error submitting spec {spec_id}")
+            return {
+                "success": False,
+                "error": str(e),
+            }
+
     @mcp.tool()
-    async def ralph_start_processing(spec_id: str) -> Dict[str, Any]:
-        """
-        Start processing a spec through the pipeline.
-        
-        This kicks off the agent invocation loop (Proposer → Critic for
-        architecture, Implementer → Verifier for implementation).
-        
-        Processing runs in the background until the spec reaches an
-        approval state or fails.
-        """
-        spec = load_spec(spec_id)
-        
+    async def approve(spec_id: str, feedback: str = "") -> Dict[str, Any]:
+        """Approve a pending architecture or implementation."""
+        orch = get_orchestrator()
+        spec = orch.get_spec(spec_id)
+
         if spec is None:
             return {"error": f"Spec '{spec_id}' not found"}
-        
-        # Check if already processing
-        if spec_id in _processing_tasks:
-            task = _processing_tasks[spec_id]
-            if not task.done():
+
+        previous_phase = spec.phase.value
+
+        try:
+            success = await orch.handle_approval(spec_id, approved=True, feedback=feedback)
+
+            if not success:
                 return {
                     "success": False,
-                    "error": f"Spec '{spec_id}' is already being processed",
-                    "phase": spec.get("phase"),
+                    "error": f"Spec '{spec_id}' is not pending approval (phase: {previous_phase})",
                 }
-        
-        phase = spec.get("phase", "")
-        
-        # Determine what processing to do
-        if phase == "architecture":
-            task = asyncio.create_task(process_spec_async(spec_id, spec))
-            _processing_tasks[spec_id] = task
+
+            # Get updated spec
+            spec = orch.get_spec(spec_id)
+            new_phase = spec.phase.value if spec else "unknown"
+
             return {
                 "success": True,
                 "spec_id": spec_id,
-                "phase": phase,
-                "message": "Architecture processing started",
+                "previous_phase": previous_phase,
+                "new_phase": new_phase,
+                "message": f"Spec approved and transitioned to {new_phase}",
             }
-        
-        elif phase == "implementation":
-            task = asyncio.create_task(process_implementation_async(spec_id, spec))
-            _processing_tasks[spec_id] = task
-            return {
-                "success": True,
-                "spec_id": spec_id,
-                "phase": phase,
-                "message": "Implementation processing started",
-            }
-        
-        elif phase.startswith("awaiting_"):
+        except Exception as e:
+            logger.exception(f"Error approving spec {spec_id}")
             return {
                 "success": False,
-                "error": f"Spec '{spec_id}' is awaiting approval ({phase})",
-                "phase": phase,
+                "error": str(e),
             }
-        
-        elif phase in ("complete", "failed", "blocked"):
-            return {
-                "success": False,
-                "error": f"Spec '{spec_id}' is in terminal state ({phase})",
-                "phase": phase,
-            }
-        
-        else:
-            return {
-                "success": False,
-                "error": f"Unknown phase: {phase}",
-                "phase": phase,
-            }
-    
+
     @mcp.tool()
-    async def ralph_approve(spec_id: str, feedback: str = "") -> Dict[str, Any]:
-        """Approve a pending architecture or implementation."""
-        spec = load_spec(spec_id)
-        
-        if spec is None:
-            return {"error": f"Spec '{spec_id}' not found"}
-        
-        phase = spec.get("phase", "")
-        
-        # Define phase transitions on approval
-        transitions = {
-            "awaiting_arch_approval": "implementation",
-            "awaiting_impl_approval": "integration",
-            "awaiting_integ_approval": "complete",
-        }
-        
-        if phase not in transitions:
-            return {
-                "error": f"Spec '{spec_id}' is not pending approval (phase: {phase})"
-            }
-        
-        new_phase = transitions[phase]
-        spec["phase"] = new_phase
-        
-        if "approvals" not in spec:
-            spec["approvals"] = []
-        spec["approvals"].append({
-            "from_phase": phase,
-            "to_phase": new_phase,
-            "feedback": feedback,
-        })
-        
-        save_spec(spec_id, spec)
-        
-        result = {
-            "success": True,
-            "spec_id": spec_id,
-            "previous_phase": phase,
-            "new_phase": new_phase,
-            "message": f"Spec approved and transitioned to {new_phase}",
-        }
-        
-        # Auto-start next phase processing
-        if new_phase in ("implementation", "integration"):
-            start_result = await ralph_start_processing(spec_id)
-            result["processing_started"] = start_result.get("success", False)
-        
-        return result
-    
-    @mcp.tool()
-    def ralph_reject(
-        spec_id: str, 
-        feedback: str, 
+    async def reject(
+        spec_id: str,
+        feedback: str,
         requested_changes: List[str] = None
     ) -> Dict[str, Any]:
         """Reject a pending architecture or implementation with feedback."""
-        spec = load_spec(spec_id)
-        
+        orch = get_orchestrator()
+        spec = orch.get_spec(spec_id)
+
         if spec is None:
             return {"error": f"Spec '{spec_id}' not found"}
-        
-        phase = spec.get("phase", "")
-        
-        transitions = {
-            "awaiting_arch_approval": "architecture",
-            "awaiting_impl_approval": "implementation",
-            "awaiting_integ_approval": "integration",
-        }
-        
-        if phase not in transitions:
+
+        previous_phase = spec.phase.value
+
+        # Combine feedback with requested changes
+        full_feedback = feedback
+        if requested_changes:
+            full_feedback += "\n\nRequested changes:\n" + "\n".join(f"- {c}" for c in requested_changes)
+
+        try:
+            success = await orch.handle_approval(spec_id, approved=False, feedback=full_feedback)
+
+            if not success:
+                return {
+                    "success": False,
+                    "error": f"Spec '{spec_id}' is not pending approval (phase: {previous_phase})",
+                }
+
+            # Get updated spec
+            spec = orch.get_spec(spec_id)
+            new_phase = spec.phase.value if spec else "unknown"
+
             return {
-                "error": f"Spec '{spec_id}' is not pending approval (phase: {phase})"
+                "success": True,
+                "spec_id": spec_id,
+                "previous_phase": previous_phase,
+                "new_phase": new_phase,
+                "iteration": spec.iteration if spec else 0,
+                "message": f"Spec rejected. Iteration {spec.iteration if spec else '?'} starting.",
             }
-        
-        spec["iteration"] = spec.get("iteration", 1) + 1
-        
-        max_iter = spec.get("max_iterations", 15)
-        if spec["iteration"] > max_iter:
-            spec["phase"] = "failed"
-            spec["failure_reason"] = f"Exceeded max iterations ({max_iter})"
-            save_spec(spec_id, spec)
+        except Exception as e:
+            logger.exception(f"Error rejecting spec {spec_id}")
             return {
                 "success": False,
-                "spec_id": spec_id,
-                "phase": "failed",
-                "message": f"Spec failed: exceeded max iterations",
+                "error": str(e),
             }
-        
-        new_phase = transitions[phase]
-        spec["phase"] = new_phase
-        
-        if "rejections" not in spec:
-            spec["rejections"] = []
-        spec["rejections"].append({
-            "from_phase": phase,
-            "to_phase": new_phase,
-            "feedback": feedback,
-            "requested_changes": requested_changes or [],
-            "iteration": spec["iteration"],
-        })
-        
-        save_spec(spec_id, spec)
-        
-        return {
-            "success": True,
-            "spec_id": spec_id,
-            "previous_phase": phase,
-            "new_phase": new_phase,
-            "iteration": spec["iteration"],
-            "message": f"Spec rejected. Iteration {spec['iteration']} starting.",
-        }
-    
+
     @mcp.tool()
-    def ralph_abort(reason: str) -> Dict[str, Any]:
+    async def abort(reason: str) -> Dict[str, Any]:
         """Abort all active pipeline runs."""
-        specs = load_specs()
-        
-        # Cancel running tasks
-        for spec_id, task in list(_processing_tasks.items()):
-            if not task.done():
-                task.cancel()
-            del _processing_tasks[spec_id]
-        
-        aborted = []
-        for spec in specs:
-            phase = spec.get("phase", "")
-            if phase not in ("complete", "failed", "blocked"):
-                spec["phase"] = "blocked"
-                spec["block_reason"] = reason
-                save_spec(spec["id"], spec)
-                aborted.append(spec["id"])
-        
+        orch = get_orchestrator()
+
+        try:
+            await orch.abort(reason)
+
+            return {
+                "success": True,
+                "message": f"Pipeline aborted: {reason}",
+            }
+        except Exception as e:
+            logger.exception("Error aborting pipeline")
+            return {
+                "success": False,
+                "error": str(e),
+            }
+
+    # =========================================================================
+    # AGENT-FACING TOOLS (for Proposer, Implementer, Verifier, etc.)
+    # =========================================================================
+
+    @mcp.tool()
+    def update_spec(
+        spec_id: str,
+        updates: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """
+        Update a spec with new information (used by Proposer/SpecWriter).
+
+        Args:
+            spec_id: The spec to update
+            updates: Fields to update (is_leaf, classes, children, shared_types, etc.)
+        """
+        orch = get_orchestrator()
+        spec = orch.get_spec(spec_id)
+
+        if spec is None:
+            return {"error": f"Spec '{spec_id}' not found"}
+
+        # Apply updates to spec object
+        allowed_fields = {
+            "is_leaf", "classes", "children", "shared_types",
+            "provides", "requires", "dependencies",
+            "acceptance_criteria", "edge_cases",
+            "problem", "success_criteria", "context",
+        }
+
+        applied = []
+        for key, value in updates.items():
+            if key in allowed_fields and hasattr(spec, key):
+                setattr(spec, key, value)
+                applied.append(key)
+
+        # Save via spec store
+        orch.spec_store.save(spec)
+
         return {
             "success": True,
-            "aborted_count": len(aborted),
-            "aborted_specs": aborted,
-            "reason": reason,
-        }
-    
-    @mcp.tool()
-    def ralph_check_processing(spec_id: str) -> Dict[str, Any]:
-        """Check if a spec is actively being processed."""
-        if spec_id not in _processing_tasks:
-            return {
-                "processing": False,
-                "spec_id": spec_id,
-            }
-        
-        task = _processing_tasks[spec_id]
-        
-        if task.done():
-            # Clean up finished task
-            del _processing_tasks[spec_id]
-            
-            # Check for exceptions
-            try:
-                task.result()
-                error = None
-            except Exception as e:
-                error = str(e)
-            
-            return {
-                "processing": False,
-                "completed": True,
-                "spec_id": spec_id,
-                "error": error,
-            }
-        
-        return {
-            "processing": True,
             "spec_id": spec_id,
+            "updated_fields": applied,
+        }
+
+    @mcp.tool()
+    async def send_message(
+        spec_id: str,
+        message_type: str,
+        payload: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """
+        Send a message from an agent (phase_complete, approval, error, etc.).
+
+        Args:
+            spec_id: The spec this message relates to
+            message_type: Type of message (phase_complete, approval_response, error_report)
+            payload: Message payload with details
+        """
+        from ..core.message import Message, MessageType
+
+        orch = get_orchestrator()
+        spec = orch.get_spec(spec_id)
+
+        if spec is None:
+            return {"error": f"Spec '{spec_id}' not found"}
+
+        # Map string message types to enum
+        type_map = {
+            "phase_complete": MessageType.PHASE_COMPLETE,
+            "approval_response": MessageType.APPROVAL_RESPONSE,
+            "error_report": MessageType.ERROR_REPORT,
+            "status_update": MessageType.STATUS_UPDATE,
+            "context_update": MessageType.CONTEXT_UPDATE,
+        }
+
+        msg_type = type_map.get(message_type)
+        if msg_type is None:
+            return {"error": f"Unknown message type: {message_type}"}
+
+        message = Message(
+            from_id=spec_id,
+            to_id="orchestrator",
+            spec_id=spec_id,
+            type=msg_type,
+            payload=payload,
+        )
+
+        await orch.message_bus.send(message)
+
+        return {"success": True}
+
+    @mcp.tool()
+    def report_error(
+        spec_id: str,
+        category: str,
+        message: str,
+        details: Dict[str, Any] = None,
+    ) -> Dict[str, Any]:
+        """
+        Report an error during verification (used by Verifier).
+
+        Args:
+            spec_id: The spec with the error
+            category: Error category (compilation, test, runtime, etc.)
+            message: Human-readable error message
+            details: Additional details (file, line, stack trace, etc.)
+        """
+        from ..core.errors import ErrorReport, ErrorCategory, ErrorSeverity
+
+        orch = get_orchestrator()
+        spec = orch.get_spec(spec_id)
+
+        if spec is None:
+            return {"error": f"Spec '{spec_id}' not found"}
+
+        # Map string category to enum
+        try:
+            error_cat = ErrorCategory(category)
+        except ValueError:
+            error_cat = ErrorCategory.AGENT
+
+        error = ErrorReport(
+            iteration=spec.iteration,
+            category=error_cat,
+            severity=ErrorSeverity.ERROR,
+            message=message,
+            details=details or {},
+            recoverable=True,
+        )
+
+        spec.add_error(error)
+        orch.spec_store.save(spec)
+
+        return {
+            "success": True,
+            "error_count": len(spec.errors),
+        }
+
+    @mcp.tool()
+    def get_sibling_status(spec_id: str) -> Dict[str, Any]:
+        """
+        Get status of sibling specs (for coordination).
+
+        Args:
+            spec_id: The spec asking about its siblings
+        """
+        from ..core.phase import Phase
+
+        orch = get_orchestrator()
+        spec = orch.get_spec(spec_id)
+
+        if spec is None:
+            return {"error": f"Spec '{spec_id}' not found"}
+
+        if not spec.parent_id:
+            return {"siblings": [], "message": "No parent - this is a root spec"}
+
+        # Get siblings via spec store
+        siblings_specs = orch.spec_store.list_children(spec.parent_id)
+
+        siblings = [
+            {
+                "id": s.id,
+                "name": s.name,
+                "phase": s.phase.value,
+                "is_complete": s.phase == Phase.COMPLETE,
+            }
+            for s in siblings_specs
+            if s.id != spec_id
+        ]
+
+        return {
+            "spec_id": spec_id,
+            "parent_id": spec.parent_id,
+            "siblings": siblings,
+            "all_complete": all(s["is_complete"] for s in siblings) if siblings else True,
         }
 
 
@@ -686,7 +447,7 @@ def main():
             file=sys.stderr
         )
         sys.exit(1)
-    
+
     logger.info("Ralph MCP Server starting...")
     mcp.run()
 

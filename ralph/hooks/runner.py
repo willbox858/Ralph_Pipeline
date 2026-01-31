@@ -89,18 +89,18 @@ def log_tool_use(
     spec_id: str,
     tool_name: str,
     tool_input: Dict,
-    tool_output: Optional[Dict] = None,
+    tool_response: Optional[Dict] = None,
 ) -> None:
     """Log tool use for audit trail."""
     state_dir = get_state_dir()
     audit_file = state_dir / "audit.jsonl"
-    
+
     entry = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "spec_id": spec_id,
         "tool_name": tool_name,
         "tool_input": tool_input,
-        "tool_output": tool_output,
+        "tool_response": tool_response,
     }
     
     with open(audit_file, "a", encoding="utf-8") as f:
@@ -114,136 +114,155 @@ def log_tool_use(
 def run_pre_tool_use() -> None:
     """
     PreToolUse hook - runs before each tool use.
-    
+
     Responsibilities:
     1. Enforce scope (block writes outside allowed paths)
     2. Block forbidden tools
     3. Inject pending messages into context
+
+    SDK Output Format:
+    - Allow: {} (empty dict)
+    - Deny: {"hookSpecificOutput": {"hookEventName": "...", "permissionDecision": "deny", "permissionDecisionReason": "..."}}
+    - With context: {"additionalContext": "..."}
     """
     input_data = read_hook_input()
-    
+
     tool_name = input_data.get("tool_name", "")
     tool_input = input_data.get("tool_input", {})
-    
+    hook_event_name = input_data.get("hook_event_name", "PreToolUse")
+
     # Get context
     context = get_agent_context_from_env()
     if not context:
         # No context = no restrictions (shouldn't happen in normal operation)
-        write_hook_output({"decision": "allow"})
+        write_hook_output({})
         return
-    
+
     spec_id = context.get("spec_id", "unknown")
     allowed_paths = context.get("allowed_paths", [])
     forbidden_paths = context.get("forbidden_paths", [])
     allowed_tools = context.get("allowed_tools", [])
-    
+
     # Check tool restrictions
     tool_allowed, tool_reason = is_tool_allowed(tool_name, allowed_tools)
     if not tool_allowed:
         write_hook_output({
-            "decision": "block",
-            "reason": f"TOOL BLOCKED: {tool_reason}",
+            "hookSpecificOutput": {
+                "hookEventName": hook_event_name,
+                "permissionDecision": "deny",
+                "permissionDecisionReason": f"TOOL BLOCKED: {tool_reason}",
+            }
         })
         return
-    
+
     # Check path restrictions for file operations
     file_tools = ["Write", "Edit", "str_replace_editor", "create_file", "MultiEdit"]
     if tool_name in file_tools:
         file_path = tool_input.get("file_path") or tool_input.get("path") or ""
-        
+
         if file_path:
             path_allowed, path_reason = is_path_allowed(
                 file_path, allowed_paths, forbidden_paths
             )
-            
+
             if not path_allowed:
                 write_hook_output({
-                    "decision": "block",
-                    "reason": f"SCOPE VIOLATION: {path_reason}\nAllowed paths: {allowed_paths}",
+                    "hookSpecificOutput": {
+                        "hookEventName": hook_event_name,
+                        "permissionDecision": "deny",
+                        "permissionDecisionReason": f"SCOPE VIOLATION: {path_reason}\nAllowed paths: {allowed_paths}",
+                    }
                 })
                 return
-    
+
     # Check for pending messages to inject
     pending = load_pending_messages(spec_id)
     if pending:
         # Clear messages so they're not re-delivered
         clear_pending_messages(spec_id)
-        
+
+        message_text = f"You have {len(pending)} pending message(s):\n" + \
+                      "\n".join(f"- {m.get('type')}: {json.dumps(m.get('payload', {}))}" for m in pending)
         write_hook_output({
-            "decision": "allow",
-            "note": f"You have {len(pending)} pending message(s):\n" + 
-                   "\n".join(f"- {m.get('type')}: {json.dumps(m.get('payload', {}))}" for m in pending),
+            "additionalContext": message_text,
         })
         return
-    
-    # Allow by default
-    write_hook_output({"decision": "allow"})
+
+    # Allow by default (empty dict = allow)
+    write_hook_output({})
 
 
 def run_post_tool_use() -> None:
     """
     PostToolUse hook - runs after each tool use.
-    
+
     Responsibilities:
     1. Track file artifacts
     2. Log tool usage for audit
     3. Validate written files (e.g., spec schema)
+
+    SDK Output Format:
+    - PostToolUse hooks observe but don't block, so output is always {}
     """
     input_data = read_hook_input()
-    
+
     tool_name = input_data.get("tool_name", "")
     tool_input = input_data.get("tool_input", {})
-    tool_output = input_data.get("tool_output", {})
-    
+    tool_response = input_data.get("tool_response", {})
+
     # Get context
     context = get_agent_context_from_env()
     spec_id = context.get("spec_id", "unknown") if context else "unknown"
-    
+
     # Log for audit
-    log_tool_use(spec_id, tool_name, tool_input, tool_output)
-    
+    log_tool_use(spec_id, tool_name, tool_input, tool_response)
+
     # Track file artifacts
     file_tools = ["Write", "Edit", "str_replace_editor", "create_file", "MultiEdit"]
     if tool_name in file_tools:
         file_path = tool_input.get("file_path") or tool_input.get("path") or ""
         if file_path:
             track_artifact(spec_id, file_path)
-    
-    # Continue (post hooks don't block)
-    write_hook_output({"decision": "continue"})
+
+    # PostToolUse hooks observe but don't block (empty dict = acknowledge)
+    write_hook_output({})
 
 
 def run_on_stop() -> None:
     """
     Stop hook - runs when agent completes.
-    
+
     Responsibilities:
     1. Capture final state
     2. Write completion marker
     3. Record artifacts created
+
+    SDK Output Format:
+    - Stop hooks don't block, so output is always {}
     """
     input_data = read_hook_input()
-    
+
     stop_reason = input_data.get("stop_reason", "unknown")
-    
+
     # Get context
     context = get_agent_context_from_env()
     spec_id = context.get("spec_id", "unknown") if context else "unknown"
-    
+
     # Write completion marker
     state_dir = get_state_dir()
     completion_file = state_dir / f"complete_{spec_id}.json"
-    
+
     completion_data = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "spec_id": spec_id,
         "stop_reason": stop_reason,
         "success": stop_reason in ["end_turn", "tool_use"],
     }
-    
+
     completion_file.write_text(json.dumps(completion_data), encoding="utf-8")
-    
-    write_hook_output({"acknowledged": True})
+
+    # Stop hooks don't block (empty dict = acknowledge)
+    write_hook_output({})
 
 
 # =============================================================================

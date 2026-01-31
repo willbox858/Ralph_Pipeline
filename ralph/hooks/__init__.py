@@ -23,6 +23,14 @@ from .runner import (
     log_tool_use,
 )
 
+from .sdk_hooks import (
+    create_ralph_hooks,
+    pre_tool_use_hook,
+    post_tool_use_hook,
+    post_tool_use_failure_hook,
+    stop_hook,
+)
+
 __all__ = [
     # Scope
     "normalize_path",
@@ -39,4 +47,10 @@ __all__ = [
     "clear_pending_messages",
     "track_artifact",
     "log_tool_use",
+    # SDK Hooks
+    "create_ralph_hooks",
+    "pre_tool_use_hook",
+    "post_tool_use_hook",
+    "post_tool_use_failure_hook",
+    "stop_hook",
 ]

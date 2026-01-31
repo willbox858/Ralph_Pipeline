@@ -215,6 +215,7 @@ $ralphRelative = [System.IO.Path]::GetRelativePath($ProjectPath, $RalphPath).Rep
 $mcpConfig = @{
     mcpServers = @{
         ralph = @{
+            type = "stdio"
             command = "cmd"
             args = @("/c", "cd", $ralphRelative, "&&", "python", "-m", "ralph.mcp_server.server")
         }

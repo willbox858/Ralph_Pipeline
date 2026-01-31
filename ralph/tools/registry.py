@@ -4,10 +4,13 @@ Tool Registry for the Ralph pipeline.
 Manages available tools and MCP servers based on tech stack configuration.
 This is the key to solving the "Unity tests don't work" problem - each
 tech stack defines what tools are available.
+
+The registry now integrates with the config system to support project-level
+customization via ralph.config.json files.
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set, Any
 from enum import Enum
 import json
 from pathlib import Path
@@ -53,6 +56,7 @@ class MCPServerConfig:
     def to_mcp_json(self) -> dict:
         """Convert to .mcp.json format."""
         config = {
+            "type": "stdio",
             "command": self.command,
             "args": self.args,
         }
@@ -123,7 +127,7 @@ PYTHON_PRESET = ToolPreset(
     name="python",
     description="Python projects with pytest",
     mcp_servers=[],
-    builtin_tools=["Read", "Write", "Edit", "Bash", "Grep", "Glob", "LS"],
+    builtin_tools=["Read", "Write", "Edit", "Bash", "Grep", "Glob"],
     build_command="python -m py_compile {file}",
     test_command="pytest {test_dir} -v",
     lint_command="ruff check {source_dir}",
@@ -135,7 +139,7 @@ CSHARP_PRESET = ToolPreset(
     name="csharp",
     description="C# / .NET projects",
     mcp_servers=[],
-    builtin_tools=["Read", "Write", "Edit", "Bash", "Grep", "Glob", "LS"],
+    builtin_tools=["Read", "Write", "Edit", "Bash", "Grep", "Glob"],
     build_command="dotnet build",
     test_command="dotnet test",
     lint_command="dotnet format --verify-no-changes",
@@ -147,7 +151,7 @@ TYPESCRIPT_PRESET = ToolPreset(
     name="typescript",
     description="TypeScript / Node.js projects",
     mcp_servers=[],
-    builtin_tools=["Read", "Write", "Edit", "Bash", "Grep", "Glob", "LS"],
+    builtin_tools=["Read", "Write", "Edit", "Bash", "Grep", "Glob"],
     build_command="npm run build",
     test_command="npm test",
     lint_command="npm run lint",
@@ -164,18 +168,18 @@ UNITY_PRESET = ToolPreset(
             command="npx",
             args=["-y", "@anthropic/mcp-unity"],
             tools=[
-                "unity_run_tests",
-                "unity_get_logs",
-                "unity_compile",
-                "unity_open_scene",
-                "unity_get_hierarchy",
-                "unity_get_components",
-                "unity_execute_menu_item",
+                "mcp__unity__run_tests",
+                "mcp__unity__get_logs",
+                "mcp__unity__compile",
+                "mcp__unity__open_scene",
+                "mcp__unity__get_hierarchy",
+                "mcp__unity__get_components",
+                "mcp__unity__execute_menu_item",
             ],
             env={"UNITY_PROJECT_PATH": "."},
         )
     ],
-    builtin_tools=["Read", "Write", "Edit", "Grep", "Glob", "LS"],
+    builtin_tools=["Read", "Write", "Edit", "Grep", "Glob"],
     build_command="",  # Unity compiles via MCP
     test_command="",   # Unity tests via MCP
     lint_command="",
@@ -192,14 +196,14 @@ GODOT_PRESET = ToolPreset(
             command="npx",
             args=["-y", "@anthropic/mcp-godot"],
             tools=[
-                "godot_run_scene",
-                "godot_get_nodes",
-                "godot_run_tests",
-                "godot_get_script",
+                "mcp__godot__run_scene",
+                "mcp__godot__get_nodes",
+                "mcp__godot__run_tests",
+                "mcp__godot__get_script",
             ],
         )
     ],
-    builtin_tools=["Read", "Write", "Edit", "Bash", "Grep", "Glob", "LS"],
+    builtin_tools=["Read", "Write", "Edit", "Bash", "Grep", "Glob"],
     build_command="",
     test_command="",
     lint_command="",
@@ -211,7 +215,7 @@ RUST_PRESET = ToolPreset(
     name="rust",
     description="Rust projects with Cargo",
     mcp_servers=[],
-    builtin_tools=["Read", "Write", "Edit", "Bash", "Grep", "Glob", "LS"],
+    builtin_tools=["Read", "Write", "Edit", "Bash", "Grep", "Glob"],
     build_command="cargo build",
     test_command="cargo test",
     lint_command="cargo clippy",
@@ -223,7 +227,7 @@ GO_PRESET = ToolPreset(
     name="go",
     description="Go projects",
     mcp_servers=[],
-    builtin_tools=["Read", "Write", "Edit", "Bash", "Grep", "Glob", "LS"],
+    builtin_tools=["Read", "Write", "Edit", "Bash", "Grep", "Glob"],
     build_command="go build ./...",
     test_command="go test ./...",
     lint_command="golangci-lint run",
@@ -253,18 +257,18 @@ BUILTIN_PRESETS: Dict[str, ToolPreset] = {
 # Tools available to each role
 ROLE_TOOL_ALLOWLIST: Dict[str, Set[str]] = {
     # Architecture team - read-only
-    "spec_writer": {"Read", "Grep", "Glob", "LS"},
-    "proposer": {"Read", "Grep", "Glob", "LS"},
-    "critic": {"Read", "Grep", "Glob", "LS"},
-    
+    "spec_writer": {"Read", "Grep", "Glob"},
+    "proposer": {"Read", "Grep", "Glob"},
+    "critic": {"Read", "Grep", "Glob"},
+
     # Implementation team - full access
-    "implementer": {"Read", "Write", "Edit", "Bash", "Grep", "Glob", "LS"},
-    "verifier": {"Read", "Bash", "Grep", "Glob", "LS"},  # Can run tests but not edit
-    
+    "implementer": {"Read", "Write", "Edit", "Bash", "Grep", "Glob"},
+    "verifier": {"Read", "Bash", "Grep", "Glob"},  # Can run tests but not edit
+
     # Maintenance team
-    "analyzer": {"Read", "Grep", "Glob", "LS"},
-    "troubleshooter": {"Read", "Bash", "Grep", "Glob", "LS"},
-    "editor": {"Read", "Write", "Edit", "Grep", "Glob", "LS"},
+    "analyzer": {"Read", "Grep", "Glob"},
+    "troubleshooter": {"Read", "Bash", "Grep", "Glob"},
+    "editor": {"Read", "Write", "Edit", "Grep", "Glob"},
 }
 
 # Tools that are always forbidden
@@ -280,13 +284,23 @@ FORBIDDEN_TOOLS: Set[str] = {
 class ToolRegistry:
     """
     Registry of available tools and presets.
-    
+
     The orchestrator uses this to provision agents with the correct tools.
+    Now supports project-level configuration via ralph.config.json.
     """
-    
-    def __init__(self):
+
+    def __init__(self, project_root: Optional[Path] = None):
+        """
+        Initialize the tool registry.
+
+        Args:
+            project_root: Optional path to project root for loading config.
+                         If provided, ralph.config.json will be loaded.
+        """
         self._presets: Dict[str, ToolPreset] = dict(BUILTIN_PRESETS)
         self._custom_mcp_servers: Dict[str, MCPServerConfig] = {}
+        self._project_root: Optional[Path] = project_root
+        self._merged_config_cache: Dict[str, Any] = {}
     
     def register_preset(self, preset: ToolPreset) -> None:
         """Register a custom tool preset."""
@@ -317,64 +331,219 @@ class ToolRegistry:
     def list_presets(self) -> List[str]:
         """List all available preset names."""
         return list(self._presets.keys())
-    
+
+    def set_project_root(self, project_root: Path) -> None:
+        """
+        Set the project root for configuration loading.
+
+        Args:
+            project_root: Path to the project root directory
+        """
+        self._project_root = project_root
+        self._merged_config_cache.clear()  # Clear cache when root changes
+
+    def _get_merged_config(self, tech_stack: str) -> Any:
+        """
+        Get merged configuration with caching.
+
+        Args:
+            tech_stack: The tech stack name
+
+        Returns:
+            MergedConfig instance with all configuration merged
+        """
+        if tech_stack in self._merged_config_cache:
+            return self._merged_config_cache[tech_stack]
+
+        if self._project_root is not None:
+            from ralph.config import get_merged_config
+            config = get_merged_config(self._project_root, tech_stack)
+            self._merged_config_cache[tech_stack] = config
+            return config
+
+        # No project root - return None to use legacy behavior
+        return None
+
     def get_tools_for_role(
         self,
         role: str,
         tech_stack: str,
         additional_mcp: Optional[List[str]] = None,
-    ) -> Dict[str, any]:
+        project_root: Optional[Path] = None,
+    ) -> Dict[str, Any]:
         """
         Get tool configuration for an agent role.
-        
+
         Args:
             role: Agent role (proposer, implementer, verifier, etc.)
             tech_stack: Tech stack name (python, csharp, unity, etc.)
             additional_mcp: Additional MCP server names to include
-            
+            project_root: Optional project root for config loading (overrides instance setting)
+
         Returns:
-            Dict with builtin_tools, mcp_servers, and commands
+            Dict with allowed_tools, mcp_servers (as dict), and commands
+        """
+        # Set project root if provided
+        if project_root is not None:
+            self.set_project_root(project_root)
+
+        # Try to get merged config from the new config system
+        merged_config = self._get_merged_config(tech_stack)
+
+        if merged_config is not None:
+            # Use new config system
+            return self._get_tools_for_role_from_config(
+                role, merged_config, additional_mcp
+            )
+
+        # Fall back to legacy preset-based behavior
+        return self._get_tools_for_role_legacy(role, tech_stack, additional_mcp)
+
+    def _get_tools_for_role_from_config(
+        self,
+        role: str,
+        merged_config: Any,  # MergedConfig
+        additional_mcp: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Get tool configuration using the new merged config system.
+
+        Args:
+            role: Agent role
+            merged_config: MergedConfig instance from config loader
+            additional_mcp: Additional MCP server names
+
+        Returns:
+            Dict with tool configuration
+        """
+        # Get tools allowed for this role from merged config
+        role_tools = merged_config.get_tools_for_role(role)
+
+        # Start with MCP servers from merged config
+        mcp_servers_dict = dict(merged_config.mcp_servers)
+
+        # Add additional MCP servers if specified
+        if additional_mcp:
+            for name in additional_mcp:
+                server = self.get_mcp_server(name)
+                if server and server.name not in mcp_servers_dict:
+                    mcp_servers_dict[server.name] = {
+                        "type": "stdio",
+                        "command": server.command,
+                        "args": server.args,
+                        "tools": server.tools,
+                        **({"env": server.env} if server.env else {})
+                    }
+
+        # Add Ralph communication tools for all roles
+        ralph_tools = [
+            "mcp__ralph__get_spec",
+            "mcp__ralph__get_sibling_status",
+            "mcp__ralph__send_message",
+            "mcp__ralph__report_error",
+            "mcp__ralph__update_spec",
+        ]
+
+        # Add Ralph MCP server
+        mcp_servers_dict["ralph"] = {
+            "type": "stdio",
+            "command": "python",
+            "args": ["-m", "ralph.mcp_server"],
+            "tools": ralph_tools,
+        }
+
+        return {
+            "allowed_tools": role_tools,
+            "mcp_servers": mcp_servers_dict,
+            "ralph_tools": ralph_tools,
+            "build_command": merged_config.build_command,
+            "test_command": merged_config.test_command,
+            "lint_command": merged_config.lint_command,
+            "source_patterns": merged_config.source_patterns,
+            "test_patterns": merged_config.test_patterns,
+            "max_turns": merged_config.get_max_turns_for_role(role),
+        }
+
+    def _get_tools_for_role_legacy(
+        self,
+        role: str,
+        tech_stack: str,
+        additional_mcp: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Legacy implementation of get_tools_for_role using presets.
+
+        This is used when no project root is configured.
+
+        Args:
+            role: Agent role
+            tech_stack: Tech stack name
+            additional_mcp: Additional MCP server names
+
+        Returns:
+            Dict with tool configuration
         """
         # Get preset (fall back to Python if unknown)
         preset = self.get_preset(tech_stack) or self.get_preset("python")
-        
+
         # Get role allowlist
         role_allowed = ROLE_TOOL_ALLOWLIST.get(role.lower(), set())
-        
+
         # Filter preset tools by role
         builtin_tools = [
             t for t in preset.builtin_tools
             if t in role_allowed and t not in FORBIDDEN_TOOLS
         ]
-        
+
         # Start with preset MCP servers
         mcp_servers = list(preset.mcp_servers)
-        
+
         # Add additional MCP servers
         if additional_mcp:
             for name in additional_mcp:
                 server = self.get_mcp_server(name)
                 if server and server not in mcp_servers:
                     mcp_servers.append(server)
-        
+
         # Add Ralph communication tools for all roles
-        # These are provided by the Ralph MCP server
         ralph_tools = [
-            "ralph_send_message",
-            "ralph_get_spec",
-            "ralph_get_sibling_status",
-            "ralph_report_error",
+            "mcp__ralph__get_spec",
+            "mcp__ralph__get_sibling_status",
+            "mcp__ralph__send_message",
+            "mcp__ralph__report_error",
+            "mcp__ralph__update_spec",
         ]
-        
+
+        # Ralph MCP server config (will be included in agent invocations)
+        ralph_server = MCPServerConfig(
+            name="ralph",
+            command="python",
+            args=["-m", "ralph.mcp_server"],
+            tools=ralph_tools,
+        )
+
+        # Import defaults for max_turns fallback in legacy mode
+        from ralph.config.defaults import DEFAULT_ROLE_MAX_TURNS
+
         return {
-            "builtin_tools": builtin_tools,
-            "mcp_servers": mcp_servers,
+            "allowed_tools": builtin_tools,
+            "mcp_servers": {
+                s.name: {
+                    "type": "stdio",
+                    "command": s.command,
+                    "args": s.args,
+                    "tools": s.tools,
+                    **({"env": s.env} if s.env else {})
+                }
+                for s in [*mcp_servers, ralph_server]
+            },
             "ralph_tools": ralph_tools,
             "build_command": preset.build_command,
             "test_command": preset.test_command,
             "lint_command": preset.lint_command,
             "source_patterns": preset.source_patterns,
             "test_patterns": preset.test_patterns,
+            "max_turns": DEFAULT_ROLE_MAX_TURNS.get(role.lower(), 50),
         }
     
     def generate_mcp_json(
@@ -412,6 +581,7 @@ class ToolRegistry:
         # Add Ralph server
         if include_ralph:
             mcp_json["mcpServers"]["ralph"] = {
+                "type": "stdio",
                 "command": "python",
                 "args": ["-m", "ralph.mcp_server"],
             }

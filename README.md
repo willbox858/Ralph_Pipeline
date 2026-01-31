@@ -165,15 +165,21 @@ my-project/
 ## Installation
 
 ```bash
-pip install ralph-pipeline
+# Create and activate virtual environment
+python3 -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+
+# Install the Claude Agent SDK
+pip3 install claude-agent-sdk
+
+# Install Ralph Pipeline
+pip3 install -e Ralph_Pipeline/
 ```
 
-Or from source:
+Or if published:
 
 ```bash
-git clone <repo>
-cd ralph_v2
-pip install -e .
+pip3 install ralph-pipeline
 ```
 
 ## Requirements
@@ -182,18 +188,9 @@ pip install -e .
 - Claude Code CLI (bundled with claude-agent-sdk)
 - API key from [Anthropic Console](https://console.anthropic.com/)
 
-## Installation
-
+Set your API key:
 ```bash
-pip install ralph-pipeline
-```
-
-Or from source:
-
-```bash
-git clone <repo>
-cd ralph_v2
-pip install -e .
+export ANTHROPIC_API_KEY=your-api-key
 ```
 
 ## Agent SDK Integration

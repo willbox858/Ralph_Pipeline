@@ -248,7 +248,7 @@ def build_agent_context(
         tech_stack=tech_stack.to_dict() if tech_stack else None,
         allowed_paths=allowed_paths or spec.get_allowed_paths(),
         forbidden_paths=[],  # Could be populated from constraints
-        allowed_tools=tool_config.get("builtin_tools", []),
+        allowed_tools=tool_config.get("allowed_tools", []),
         build_command=tool_config.get("build_command", ""),
         test_command=tool_config.get("test_command", ""),
         lint_command=tool_config.get("lint_command", ""),

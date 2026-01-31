@@ -1,15 +1,27 @@
 {
   "name": "MyCSharpProject",
-  "tech_stack": {
-    "language": "C#",
-    "runtime": ".NET 8",
-    "frameworks": [],
-    "test_framework": "xunit",
-    "build_command": "dotnet build",
-    "test_command": "dotnet test",
-    "lint_command": "dotnet format --verify-no-changes",
-    "mcp_tools": []
+  "tech_stack": "csharp",
+  "mcp_servers": {
+    "custom_analyzer": {
+      "type": "stdio",
+      "command": "dotnet",
+      "args": ["run", "--project", "./tools/analyzer"],
+      "tools": ["mcp__custom_analyzer__analyze_code"]
+    }
   },
+  "role_overrides": {
+    "implementer": {
+      "additional_tools": [],
+      "remove_tools": []
+    },
+    "verifier": {
+      "additional_tools": [],
+      "remove_tools": []
+    }
+  },
+  "build_command": "dotnet build",
+  "test_command": "dotnet test",
+  "lint_command": "dotnet format --verify-no-changes",
   "specs_dir": "Specs/Active",
   "source_dir": "src",
   "max_iterations": 15
