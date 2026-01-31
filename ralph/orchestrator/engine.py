@@ -247,6 +247,230 @@ class Orchestrator:
         for task in self._running_agents.values():
             task.cancel()
         self._status.running = False
+
+    async def start_spec(self, spec_id: str) -> Dict[str, Any]:
+        """
+        Start processing a spec that's in DRAFT or READY phase.
+
+        Use this to kick off processing for specs that were submitted with
+        auto_start=False, or specs that are sitting idle in early phases.
+
+        Args:
+            spec_id: The spec to start processing
+
+        Returns:
+            Dict with success, phase info, and message or error
+        """
+        spec = self.spec_store.get(spec_id)
+        if spec is None:
+            return {"success": False, "error": f"Spec '{spec_id}' not found"}
+
+        # Only start specs in DRAFT or READY phase
+        if spec.phase not in (Phase.DRAFT, Phase.READY):
+            return {
+                "success": False,
+                "error": f"Spec '{spec_id}' is in phase '{spec.phase.value}' - "
+                         f"can only start specs in DRAFT or READY phase. "
+                         f"Use restart_spec for FAILED/BLOCKED specs, or "
+                         f"restart_spec with unstuck=True for stuck active specs.",
+            }
+
+        previous_phase = spec.phase.value
+
+        # If in DRAFT, transition to READY first
+        if spec.phase == Phase.DRAFT:
+            result = self.state_machine.transition(
+                spec, Phase.READY,
+                triggered_by="user",
+                reason="User started spec processing",
+            )
+            if not result.success:
+                return {"success": False, "error": result.error}
+            self.spec_store.save(spec)
+
+        # Now process from READY -> ARCHITECTURE
+        await self._process_spec(spec)
+
+        # Refresh spec to get updated phase
+        spec = self.spec_store.get(spec_id)
+
+        return {
+            "success": True,
+            "spec_id": spec_id,
+            "spec_name": spec.name if spec else "unknown",
+            "previous_phase": previous_phase,
+            "new_phase": spec.phase.value if spec else "unknown",
+            "message": f"Spec started: {previous_phase} -> {spec.phase.value if spec else 'unknown'}",
+        }
+
+    async def restart_spec(
+        self,
+        spec_id: str,
+        target_phase: Optional[str] = None,
+        reset_iteration: bool = True,
+        clear_errors: bool = False,
+        reason: str = "",
+        unstuck: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        Restart a FAILED or BLOCKED spec, or unstick a hung spec in an active phase.
+
+        Args:
+            spec_id: The spec to restart
+            target_phase: Target phase ("architecture", "implementation", "integration").
+                          If None, auto-selects based on spec.is_leaf (or current phase if unstuck).
+            reset_iteration: If True, reset iteration counter to 0 (default: True)
+            clear_errors: If True, clear error history (default: False)
+            reason: Explanation of why restarting (logged in transition history)
+            unstuck: If True, allows restarting specs stuck in active phases
+                     (ARCHITECTURE, IMPLEMENTATION, INTEGRATION) by re-deploying
+                     the agent team without changing the phase. This is a "soft"
+                     restart that doesn't reset progress.
+
+        Returns:
+            Dict with success, phase info, and message or error
+        """
+        from ..core.phase import Phase, PHASE_TRANSITIONS
+
+        # Validate spec exists
+        spec = self.spec_store.get(spec_id)
+        if spec is None:
+            return {"success": False, "error": f"Spec '{spec_id}' not found"}
+
+        # Phases that can be "unstuck" (active working phases)
+        active_phases = {Phase.ARCHITECTURE, Phase.IMPLEMENTATION, Phase.INTEGRATION}
+
+        # Phases that can be fully restarted (terminal/blocked phases)
+        restartable_phases = {Phase.FAILED, Phase.BLOCKED}
+
+        # Map string to Phase enum
+        phase_map = {
+            "architecture": Phase.ARCHITECTURE,
+            "implementation": Phase.IMPLEMENTATION,
+            "integration": Phase.INTEGRATION,
+        }
+
+        # Handle unstuck mode - re-deploy team for current active phase
+        if unstuck:
+            if spec.phase not in active_phases:
+                return {
+                    "success": False,
+                    "error": f"Spec '{spec_id}' is in phase '{spec.phase.value}' - "
+                             f"unstuck only works for active phases (architecture, implementation, integration). "
+                             f"Use restart without unstuck=True for FAILED/BLOCKED specs.",
+                }
+
+            # For unstuck, target is current phase (re-deploy same team)
+            target = spec.phase
+            previous_phase = spec.phase.value
+            preserved_error_count = len(spec.errors)
+
+            # Optionally reset iteration (default True, but user may want False for soft unstick)
+            if reset_iteration:
+                spec.iteration = 0
+
+            if clear_errors:
+                spec.errors = []
+
+            # Save spec and re-deploy the team (no phase transition needed)
+            self.spec_store.save(spec)
+
+            # Re-trigger the deployment side effect
+            if target == Phase.ARCHITECTURE:
+                await self._deploy_architecture_team(spec, "unstuck")
+            elif target == Phase.IMPLEMENTATION:
+                await self._deploy_implementation_team(spec, "unstuck")
+            elif target == Phase.INTEGRATION:
+                await self._deploy_integration_team(spec, "unstuck")
+
+            return {
+                "success": True,
+                "spec_id": spec_id,
+                "spec_name": spec.name,
+                "previous_phase": previous_phase,
+                "new_phase": target.value,
+                "iteration": spec.iteration,
+                "errors_preserved": 0 if clear_errors else preserved_error_count,
+                "unstuck": True,
+                "message": f"Spec unstuck: re-deployed {target.value} team",
+            }
+
+        # Standard restart mode - requires FAILED or BLOCKED phase
+        if spec.phase not in restartable_phases:
+            return {
+                "success": False,
+                "error": f"Spec '{spec_id}' is in phase '{spec.phase.value}' - "
+                         f"can only restart FAILED or BLOCKED specs. "
+                         f"Use unstuck=True to re-deploy agents for stuck active specs.",
+            }
+
+        # Auto-select target phase if not specified
+        if target_phase is None:
+            if spec.is_leaf:
+                target = Phase.IMPLEMENTATION
+            else:
+                target = Phase.ARCHITECTURE
+        else:
+            target = phase_map.get(target_phase.lower())
+            if target is None:
+                return {
+                    "success": False,
+                    "error": f"Invalid target_phase '{target_phase}'. "
+                             f"Must be: architecture, implementation, or integration",
+                }
+
+        # Validate transition is allowed
+        valid_targets = PHASE_TRANSITIONS.get(spec.phase, set())
+        if target not in valid_targets:
+            valid_list = [p.value for p in valid_targets]
+            return {
+                "success": False,
+                "error": f"Cannot restart from {spec.phase.value} to {target.value}. "
+                         f"Valid targets: {valid_list}",
+            }
+
+        # Record previous state
+        previous_phase = spec.phase.value
+        preserved_error_count = len(spec.errors)
+
+        # Reset iteration if requested
+        if reset_iteration:
+            spec.iteration = 0
+
+        # Clear errors if requested
+        if clear_errors:
+            spec.errors = []
+
+        # Perform the transition
+        result = self.state_machine.transition(
+            spec,
+            target,
+            triggered_by="user",
+            reason=reason or f"Manual restart from {previous_phase}",
+        )
+
+        if not result.success:
+            return {"success": False, "error": result.error}
+
+        # Save and execute side effects
+        self.spec_store.save(spec)
+        await self.state_machine.execute_side_effects(spec, result.side_effects)
+
+        # Clean up pending approvals list if spec was there
+        if spec_id in self._status.pending_approvals:
+            self._status.pending_approvals.remove(spec_id)
+
+        return {
+            "success": True,
+            "spec_id": spec_id,
+            "spec_name": spec.name,
+            "previous_phase": previous_phase,
+            "new_phase": target.value,
+            "iteration": spec.iteration,
+            "errors_preserved": 0 if clear_errors else preserved_error_count,
+            "unstuck": False,
+            "message": f"Spec restarted: {previous_phase} -> {target.value}",
+        }
     
     # =========================================================================
     # INTERNAL PROCESSING
