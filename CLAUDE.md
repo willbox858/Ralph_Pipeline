@@ -25,6 +25,8 @@ Use these commands to interact with the pipeline:
 
 | Command | Description |
 |---------|-------------|
+| `/ralph:config` | View current configuration |
+| `/ralph:config --init` | Initialize Ralph for a new project |
 | `/ralph:status` | Check pipeline status |
 | `/ralph:new-spec` | Start drafting a new spec |
 | `/ralph:approve <spec-id>` | Approve a pending spec |
