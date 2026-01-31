@@ -487,11 +487,30 @@ if HAS_MCP_SDK:
             spec_id: The spec to update
             updates: Fields to update (is_leaf, classes, children, shared_types, etc.)
         """
+        from ..core.spec import (
+            ClassDefinition, Interface, SharedType, Dependency,
+            Criterion, ChildRef
+        )
+
         orch = get_orchestrator()
         spec = orch.get_spec(spec_id)
 
         if spec is None:
             return {"error": f"Spec '{spec_id}' not found"}
+
+        # Type converters for complex fields
+        converters = {
+            "classes": lambda items: [ClassDefinition.from_dict(c) for c in items],
+            "provides": lambda items: [Interface.from_dict(i) for i in items],
+            "requires": lambda items: [Interface.from_dict(i) for i in items],
+            "shared_types": lambda items: [SharedType.from_dict(t) for t in items],
+            "dependencies": lambda items: [Dependency.from_dict(d) for d in items],
+            "children": lambda items: [ChildRef.from_dict(c) for c in items],
+            "acceptance_criteria": lambda items: [Criterion.from_dict(c) for c in items],
+            "edge_cases": lambda items: [Criterion.from_dict(c) for c in items],
+        }
+
+        simple_fields = {"is_leaf", "problem", "success_criteria", "context"}
 
         # Apply updates to spec object
         allowed_fields = {
@@ -504,7 +523,10 @@ if HAS_MCP_SDK:
         applied = []
         for key, value in updates.items():
             if key in allowed_fields and hasattr(spec, key):
-                setattr(spec, key, value)
+                if key in converters:
+                    setattr(spec, key, converters[key](value))
+                elif key in simple_fields:
+                    setattr(spec, key, value)
                 applied.append(key)
 
         # Save via spec store

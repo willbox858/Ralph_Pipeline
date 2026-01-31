@@ -168,7 +168,7 @@ class Orchestrator:
         feedback: str = "",
     ) -> bool:
         """Handle user approval/rejection."""
-        spec = self.spec_store.get(spec_id)
+        spec = self.spec_store.get_fresh(spec_id)
         if not spec or not is_approval_phase(spec.phase):
             return False
         
@@ -217,16 +217,16 @@ class Orchestrator:
     def get_pending_approvals(self) -> List[ApprovalRequestPayload]:
         """Get list of specs awaiting approval."""
         pending = []
-        
-        for spec_id in self._status.pending_approvals:
-            spec = self.spec_store.get(spec_id)
-            if spec and is_approval_phase(spec.phase):
+
+        # Scan disk for all specs in approval phases (survives restart)
+        for spec in self.spec_store.list_all():
+            if is_approval_phase(spec.phase):
                 approval_type = {
                     Phase.AWAITING_ARCH_APPROVAL: "architecture",
                     Phase.AWAITING_IMPL_APPROVAL: "implementation",
                     Phase.AWAITING_INTEG_APPROVAL: "integration",
                 }.get(spec.phase, "unknown")
-                
+
                 pending.append(ApprovalRequestPayload(
                     spec_id=spec.id,
                     spec_name=spec.name,
@@ -234,7 +234,7 @@ class Orchestrator:
                     summary=f"{spec.problem[:100]}...",
                     files_to_review=self._get_files_for_review(spec),
                 ))
-        
+
         return pending
     
     def get_spec(self, spec_id: str) -> Optional[Spec]:

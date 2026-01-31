@@ -114,24 +114,30 @@ class SpecStore:
     def get(self, spec_id: str) -> Optional[Spec]:
         """
         Get a spec by ID (from cache or disk).
-        
+
         Args:
             spec_id: The spec ID
-            
+
         Returns:
             Spec if found, None otherwise
         """
         # Check cache first
         if spec_id in self._cache:
             return self._cache[spec_id]
-        
+
         # Search for spec file
         for spec_dir in self.specs_dir.rglob("spec.json"):
             spec = self.load(spec_dir)
             if spec and spec.id == spec_id:
                 return spec
-        
+
         return None
+
+    def get_fresh(self, spec_id: str) -> Optional[Spec]:
+        """Get a spec by ID, bypassing cache (reads from disk)."""
+        # Clear this spec from cache first
+        self._cache.pop(spec_id, None)
+        return self.get(spec_id)  # Will now read from disk
     
     def get_by_name(self, name: str) -> Optional[Spec]:
         """

@@ -385,11 +385,15 @@ class Spec:
     @classmethod
     def from_dict(cls, data: dict) -> "Spec":
         """Create from dictionary."""
+        try:
+            phase = Phase(data.get("phase", "draft"))
+        except ValueError:
+            phase = Phase.DRAFT  # Fallback for invalid phases
         return cls(
             id=data.get("id", str(uuid.uuid4())),
             name=data.get("name", ""),
             parent_id=data.get("parent_id"),
-            phase=Phase(data.get("phase", "draft")),
+            phase=phase,
             is_leaf=data.get("is_leaf"),
             problem=data.get("problem", ""),
             success_criteria=data.get("success_criteria", ""),

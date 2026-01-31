@@ -191,8 +191,9 @@ class StateMachine:
                     results[effect] = False
                     print(f"Side effect {effect} failed: {e}")
             else:
-                # No handler registered - log but don't fail
-                results[effect] = True
+                # No handler registered - this is likely a configuration error
+                print(f"Warning: No handler registered for side effect '{effect}'")
+                results[effect] = False
         
         return results
     
